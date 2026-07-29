@@ -124,3 +124,58 @@ Aciona manualmente o serviço de cálculo sem precisar esperar a próxima execu�
   "message": "Dashboard atualizado à força com sucesso!"
 }
 ```
+
+### Buscar Detalhes das Vendas (com Atendimentos e Clientes)
+
+Retorna a lista detalhada das vendas com informações enriquecidas de seus respectivos atendimentos (canais, avaliações, métricas e insights de IA) e clientes (nome, CEP, resumo de perfil e redes sociais).
+
+- **Rota**: `GET /api/dashboard/vendas`
+- **Parâmetros de Consulta Opcionais (Query Params)**:
+  - `limit`: Quantidade de vendas retornadas (padrão: `50`)
+  - `status`: Filtrar pelo status da venda (ex: `Aguardando Pagamento`, `Fechada`)
+  - `canal`: Filtrar por canal de atendimento (ex: `Facebook`, `WhatsApp`)
+- **Resposta de Sucesso (200 OK)**:
+
+```json
+{
+  "success": true,
+  "count": 1,
+  "resumo": {
+    "faturamento_total": 30.00,
+    "ticket_medio": 30.00
+  },
+  "data": [
+    {
+      "id_venda": "ddceedb8-89c7-4838-8dc9-7badbe4b...",
+      "data_venda": "2026-07-08T01:03:29.000Z",
+      "cliente": "Mario",
+      "cep": "17525-181",
+      "canal": "Facebook",
+      "itens": "1x Adubo NPK 10-10-10 1kg",
+      "frete": 15.00,
+      "total": 30.00,
+      "status": "Aguardando Pagamento",
+      "transportadora": "PAC",
+      "valor_produtos": 15.00,
+      "cliente_detalhes": {
+        "id": "26dab5fd-e453-467a-b61d-8e86352f...",
+        "nome": "Mario",
+        "cep_padrao": "17525-181",
+        "id_face": "36197839983165176",
+        "resumo": null,
+        "cliente_desde": "2026-07-08T01:01:06.675Z"
+      },
+      "atendimento_detalhes": {
+        "id": "c18c2d37-a2db-4d94-ab64-928afc59...",
+        "canal": "Facebook",
+        "status_funil": "Fechada",
+        "iniciado_em": "2026-07-08T01:01:06.000Z",
+        "nota_feedback": 9,
+        "categoria_feedback": "Excelente",
+        "qualidade_ia": null,
+        "insights_ia": null
+      }
+    }
+  ]
+}
+```
