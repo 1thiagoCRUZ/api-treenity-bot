@@ -1,31 +1,79 @@
+import './config/env.js';
+
 import express from 'express';
-import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import cors from 'cors';
+import cookieParser from 'cookie-parser';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-dotenv.config({ path: path.resolve(__dirname, '../.env') });
-dotenv.config({ path: path.resolve(__dirname, '.env') });
-dotenv.config();
-
 import { startCronJobs } from './cron/dashboard.cron.js';
+import authRoutes from './routes/auth.routes.js';
 import dashboardRoutes from './routes/dashboard.routes.js';
+import chatRoutes from './routes/chat.routes.js';
+import { errorHandler } from './middlewares/error.middleware.js';
+import http from 'http';
+import { Server } from 'socket.io';
+import configureChatSockets from './sockets/chat.socket.js';
 
 const app = express();
+const server = http.createServer(app);
+
+// Origens do frontend/demo que podem chamar a API com cookies (refresh token).
+// Wildcard ("*") não funciona junto de credentials/cookies — precisa ser explícita.
+// Aceita uma lista separada por vírgula (ex: várias portas/hosts usados em dev).
+const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:3000')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+function checkOrigin(origin, callback) {
+    // Requisições sem "origin" (ex: curl, apps mobile) são liberadas
+    if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+    }
+    return callback(new Error(`Origem não permitida pelo CORS: ${origin}`));
+}
+
+const io = new Server(server, {
+    cors: {
+        origin: checkOrigin,
+        methods: ["GET", "POST"],
+        credentials: true
+    }
+});
+
+// Configura os sockets de chat
+configureChatSockets(io);
 const porta = process.env.PORT || 3000;
 
+app.use(cors({ origin: checkOrigin, credentials: true }));
 app.use(express.json());
-app.use('/api/dashboard', dashboardRoutes);
+app.use(cookieParser());
+app.use(express.static(path.join(__dirname, '../public')));
 
-app.listen(porta, () => {
+app.use('/api/auth', authRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/chat', chatRoutes);
+
+app.use(errorHandler);
+
+server.listen(porta, () => {
     console.log(`======================================================`);
     console.log(`Server is running on port ${porta}`);
     console.log(`Available endpoints:`);
+    console.log(`   - POST http://localhost:${porta}/api/auth/login`);
+    console.log(`   - POST http://localhost:${porta}/api/auth/refresh`);
+    console.log(`   - POST http://localhost:${porta}/api/auth/logout`);
+    console.log(`   - GET  http://localhost:${porta}/api/auth/me`);
     console.log(`   - GET  http://localhost:${porta}/api/dashboard`);
     console.log(`   - GET  http://localhost:${porta}/api/dashboard/vendas`);
     console.log(`   - POST http://localhost:${porta}/api/dashboard/atualizar`);
+    console.log(`   - POST http://localhost:${porta}/api/chat/init`);
+    console.log(`   - GET  http://localhost:${porta}/api/chat/history/:conversaId`);
+    console.log(`Sockets enabled at /chat namespace`);
     console.log(`======================================================`);
     startCronJobs();
 });

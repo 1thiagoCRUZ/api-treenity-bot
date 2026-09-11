@@ -1,0 +1,1 @@
+ALTER TABLE "dashboard_metrics_diarias" ALTER COLUMN "faturamento_total" SET DEFAULT 0;

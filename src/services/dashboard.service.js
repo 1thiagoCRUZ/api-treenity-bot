@@ -1,27 +1,21 @@
-import { supabase } from "../config/supabase.js";
+import { and, count, desc, eq, sum } from 'drizzle-orm';
+import { db } from '../db/client.js';
+import { clientes, atendimentos, vendas, dashboardMetricsDiarias } from '../db/schema.js';
 
 async function countTotalCustomers() {
-    const { count, error } = await supabase
-        .from('clientes')
-        .select('*', { count: 'exact', head: true} );
-    if (error) throw new Error(`Error customers: ${error.message}`);
-    return count || 0;
+    const [{ total }] = await db.select({ total: count() }).from(clientes);
+    return total || 0;
 }
 
 async function countTotalAppointments() {
-    const { count, error } = await supabase
-        .from('atendimentos')
-        .select('*', { count: 'exact', head: true} );
-    if (error) throw new Error(`Error appointments: ${error.message}`);
-    return count || 0;
+    const [{ total }] = await db.select({ total: count() }).from(atendimentos);
+    return total || 0;
 }
 
 async function countTotalRevenue() {
-    const { data, error } = await supabase
-        .from('vendas')
-        .select('valor_total');
-    if (error) throw new Error(`Error sales: ${error.message}`);
-    return (data || []).reduce((acc, venda) => acc + (Number(venda.valor_total) || 0), 0);
+    // Soma feita no próprio Postgres (antes era feita em memória no Node, puxando a tabela inteira)
+    const [{ total }] = await db.select({ total: sum(vendas.valorTotal) }).from(vendas);
+    return Number(total) || 0;
 }
 
 export async function consolidateMetrics() {
@@ -30,24 +24,32 @@ export async function consolidateMetrics() {
         const [totalClientes, totalAtendimentos, faturamentoTotal] = await Promise.all([
             countTotalCustomers(),
             countTotalAppointments(),
-            countTotalRevenue()
+            countTotalRevenue(),
         ]);
 
         const dataHoje = new Date().toISOString().split('T')[0];
 
         const metricasConsolidadas = {
-            data_referencia: dataHoje,
-            total_clientes: totalClientes,
-            total_atendimentos: totalAtendimentos,
-            faturamento_total: faturamentoTotal,
-            atualizado_em: new Date().toISOString()
+            dataReferencia: dataHoje,
+            totalClientes,
+            totalAtendimentos,
+            faturamentoTotal,
+            atualizadoEm: new Date(),
         };
 
-        const { error } = await supabase
-            .from('dashboard_metrics_diarias')
-            .upsert(metricasConsolidadas, { onConflict: 'data_referencia' });
+        await db
+            .insert(dashboardMetricsDiarias)
+            .values(metricasConsolidadas)
+            .onConflictDoUpdate({
+                target: dashboardMetricsDiarias.dataReferencia,
+                set: {
+                    totalClientes: metricasConsolidadas.totalClientes,
+                    totalAtendimentos: metricasConsolidadas.totalAtendimentos,
+                    faturamentoTotal: metricasConsolidadas.faturamentoTotal,
+                    atualizadoEm: metricasConsolidadas.atualizadoEm,
+                },
+            });
 
-        if (error) throw error;
         console.log('Consolidated metrics saved successfully!');
         return metricasConsolidadas;
     } catch (erro) {
@@ -57,14 +59,20 @@ export async function consolidateMetrics() {
 }
 
 export async function getMetrics() {
-    const { data, error } = await supabase
-        .from('dashboard_metrics_diarias')
-        .select('*')
-        .order('data_referencia', { ascending: false })
+    const linhas = await db
+        .select()
+        .from(dashboardMetricsDiarias)
+        .orderBy(desc(dashboardMetricsDiarias.dataReferencia))
         .limit(30);
 
-    if (error) throw new Error(`Erro ao buscar métricas: ${error.message}`);
-    return data;
+    // Mantém o contrato de resposta em snake_case (compatibilidade com o frontend já existente)
+    return linhas.map((linha) => ({
+        data_referencia: linha.dataReferencia,
+        total_clientes: linha.totalClientes,
+        total_atendimentos: linha.totalAtendimentos,
+        faturamento_total: linha.faturamentoTotal,
+        atualizado_em: linha.atualizadoEm,
+    }));
 }
 
 export async function getSalesDetails(options = {}) {
@@ -72,96 +80,52 @@ export async function getSalesDetails(options = {}) {
     const status = options.status;
     const canal = options.canal;
 
-    let query = supabase
-        .from('vendas')
-        .select(`
-            id,
-            itens_pedido,
-            valor_produtos,
-            valor_frete,
-            valor_total,
-            transportadora,
-            status_venda,
-            criado_em,
-            atendimentos (
-                id,
-                canal,
-                status_funil,
-                nota_feedback,
-                categoria_feedback,
-                qualidade_ia,
-                insights_ia,
-                criado_em,
-                clientes (
-                    id,
-                    nome,
-                    cep_padrao,
-                    id_face,
-                    resumo,
-                    criado_em
-                )
-            )
-        `)
-        .order('criado_em', { ascending: false })
+    const condicoes = [];
+    if (status) condicoes.push(eq(vendas.statusVenda, status));
+    if (canal) condicoes.push(eq(atendimentos.canal, canal)); // filtrado no banco, antes do limit
+
+    const linhas = await db
+        .select({ venda: vendas, atendimento: atendimentos, cliente: clientes })
+        .from(vendas)
+        .leftJoin(atendimentos, eq(vendas.atendimentoId, atendimentos.id))
+        .leftJoin(clientes, eq(atendimentos.clienteId, clientes.id))
+        .where(condicoes.length ? and(...condicoes) : undefined)
+        .orderBy(desc(vendas.criadoEm))
         .limit(limit);
 
-    if (status) {
-        query = query.eq('status_venda', status);
-    }
-
-    const { data, error } = await query;
-
-    if (error) throw new Error(`Erro ao buscar detalhes das vendas: ${error.message}`);
-
-    const vendasFormatadas = (data || []).map(venda => {
-        const atendimento = Array.isArray(venda.atendimentos) ? venda.atendimentos[0] : (venda.atendimentos || {});
-        const cliente = Array.isArray(atendimento.clientes) ? atendimento.clientes[0] : (atendimento.clientes || {});
-
-        const canalAtendimento = atendimento.canal || null;
-        const cepCliente = cliente.cep_padrao || null;
-        const nomeCliente = cliente.nome || 'Desconhecido';
-
-        if (canal && canalAtendimento !== canal) {
-            return null;
-        }
+    return linhas.map(({ venda, atendimento, cliente }) => {
+        const nomeCliente = cliente?.nome || 'Desconhecido';
 
         return {
             id_venda: venda.id,
-            data_venda: venda.criado_em,
+            data_venda: venda.criadoEm,
             cliente: nomeCliente,
-            cep: cepCliente,
-            canal: canalAtendimento,
-            itens: venda.itens_pedido || '',
-            frete: Number(venda.valor_frete) || 0,
-            total: Number(venda.valor_total) || 0,
-            status: venda.status_venda || 'Desconhecido',
+            cep: cliente?.cepPadrao || null,
+            canal: atendimento?.canal || null,
+            itens: venda.itensPedido || '',
+            frete: Number(venda.valorFrete) || 0,
+            total: Number(venda.valorTotal) || 0,
+            status: venda.statusVenda || 'Desconhecido',
             transportadora: venda.transportadora || null,
-            valor_produtos: Number(venda.valor_produtos) || 0,
+            valor_produtos: Number(venda.valorProdutos) || 0,
             cliente_detalhes: {
-                id: cliente.id || null,
+                id: cliente?.id || null,
                 nome: nomeCliente,
-                cep_padrao: cepCliente,
-                id_face: cliente.id_face || null,
-                resumo: cliente.resumo || null,
-                cliente_desde: cliente.criado_em || null
+                cep_padrao: cliente?.cepPadrao || null,
+                id_face: cliente?.idFace || null,
+                resumo: cliente?.resumo || null,
+                cliente_desde: cliente?.criadoEm || null,
             },
             atendimento_detalhes: {
-                id: atendimento.id || null,
-                canal: canalAtendimento,
-                status_funil: atendimento.status_funil || null,
-                iniciado_em: atendimento.criado_em || null,
-                nota_feedback: atendimento.nota_feedback ?? null,
-                categoria_feedback: atendimento.categoria_feedback || null,
-                qualidade_ia: atendimento.qualidade_ia ?? null,
-                insights_ia: atendimento.insights_ia || null
-            }
+                id: atendimento?.id || null,
+                canal: atendimento?.canal || null,
+                status_funil: atendimento?.statusFunil || null,
+                iniciado_em: atendimento?.criadoEm || null,
+                nota_feedback: atendimento?.notaFeedback ?? null,
+                categoria_feedback: atendimento?.categoriaFeedback || null,
+                qualidade_ia: atendimento?.qualidadeIa ?? null,
+                insights_ia: atendimento?.insightsIa || null,
+            },
         };
-    }).filter(Boolean);
-
-    return vendasFormatadas;
+    });
 }
-
-export {
-    getSalesDetails as getSalesDetailsService,
-    getSalesDetails as obterDetalhesVendas
-};

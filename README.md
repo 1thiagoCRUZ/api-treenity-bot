@@ -18,9 +18,23 @@ Em vez de calcular os dados em tempo real, utilizamos Cron Jobs que rodam em seg
 ## Tecnologias Utilizadas
 
 - **Node.js com Express**: Criação do servidor e rotas REST.
-- **Supabase (PostgreSQL)**: Banco de dados relacional.
+- **Supabase (PostgreSQL)**: Banco de dados relacional (hospedagem apenas — todo o acesso a dados da API é feito via Drizzle, sem o SDK do Supabase).
+- **Drizzle ORM + Drizzle Kit**: toda leitura/escrita (dashboard, chat e autenticação) passa pelo Drizzle, com schema e migrations versionadas em `src/db/schema.js` / `drizzle/`, conexão direta ao Postgres via `pg`.
+- **JWT (jsonwebtoken) + refresh token com rotação**: Autenticação stateless — access token curto (15min) no header `Authorization`, refresh token (7 dias) em cookie httpOnly.
 - **node-cron**: Agendador de tarefas em background.
 - **dotenv**: Gerenciamento de variáveis de ambiente.
+
+## Autenticação
+
+Todas as rotas de `/api/dashboard` e `/api/chat` exigem um usuário autenticado (`Authorization: Bearer <accessToken>`). Não existe cadastro público — contas são criadas por um admin já autenticado, e o primeiro admin é criado via script (não pela API).
+
+- `POST /api/auth/login` `{ email, senha }` → devolve `{ accessToken, usuario }` e grava o refresh token num cookie httpOnly.
+- `POST /api/auth/refresh` → usa o cookie para rotacionar o refresh token e emitir um novo access token.
+- `POST /api/auth/logout` → revoga o refresh token atual.
+- `GET /api/auth/me` → dados do usuário autenticado (requer Bearer token).
+- `POST /api/auth/usuarios` `{ nome, email, senha, papel? }` → cria um usuário; `papel` é opcional (`admin` ou `funcionario`, padrão `funcionario`); só admins autenticados podem chamar.
+
+No Socket.io, conecte informando o token no handshake: `io(url, { auth: { token: accessToken } })`. Sem isso a conexão é recusada.
 
 ## Estrutura do Projeto
 
@@ -29,35 +43,34 @@ O código está dividido por responsabilidades para facilitar a manutenção:
 ```
 /src
 ├── app.js                 # Ponto de entrada (sobe o servidor e ativa o cron)
-├── config/                
-│   └── supabase.js        # Instância de conexão com o banco de dados
-├── cron/                  
-│   └── dashboardCron.js   # Regras de agendamento de tempo (quando rodar)
-├── controllers/           
-│   └── dashboardController.js # Lida com a requisição da rota e devolve o JSON
-├── routes/                
-│   └── dashboardRoutes.js # Mapeamento das URLs (Endpoints) da API
-└── services/              
-    └── dashboardService.js # Regras de negócio e comunicação pesada com o banco (SQL)
+├── config/
+│   └── env.js              # Carrega o .env uma única vez (dotenv)
+├── db/
+│   ├── schema.js            # Definição das tabelas + relations (Drizzle)
+│   ├── client.js            # Instância de conexão com o Postgres (Drizzle)
+│   ├── migrate.js           # Script que aplica as migrations
+│   └── seed-admin.js        # Cria o primeiro usuário admin
+├── cron/
+│   └── dashboard.cron.js    # Regras de agendamento de tempo (quando rodar)
+├── middlewares/
+│   ├── auth.middleware.js   # requireAuth / requireRole
+│   ├── asyncHandler.js
+│   └── error.middleware.js
+├── controllers/              # Lida com a requisição da rota e devolve o JSON
+├── routes/                   # Mapeamento das URLs (Endpoints) da API
+├── services/                  # Regras de negócio e consultas ao banco (Drizzle)
+├── sockets/
+│   └── chat.socket.js        # Autenticação e regras do namespace /chat
+└── utils/
+    ├── crypto.util.js         # Criptografia das mensagens do chat
+    └── jwt.util.js             # Assinatura/verificação do access token
 ```
+
+Tabelas gerenciadas pelo Drizzle (`src/db/schema.js`, migrations em `drizzle/`): `usuarios`, `refresh_tokens`, `chat_conversas`, `chat_mensagens`, além de `clientes`, `atendimentos`, `vendas` e `dashboard_metrics_diarias`, que já existiam no banco e foram trazidas para o schema.
 
 ## Como Configurar e Rodar Localmente
 
-### 1. Preparando o Banco de Dados 
-
-Antes de rodar o código, você precisa criar a tabela que vai receber os dados consolidados. Vá no SQL Editor do seu Supabase e execute:
-
-```sql
-CREATE TABLE dashboard_metrics_diarias (
-    data_referencia DATE PRIMARY KEY,
-    total_clientes INT DEFAULT 0,
-    total_atendimentos INT DEFAULT 0,
-    faturamento_total DECIMAL(10,2) DEFAULT 0,
-    atualizado_em TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-```
-
-### 2. Clonando e Instalando Dependências
+### 1. Clonando e Instalando Dependências
 
 No seu terminal, rode:
 
@@ -65,15 +78,27 @@ No seu terminal, rode:
 npm install
 ```
 
-### 3. Variáveis de Ambiente
+### 2. Variáveis de Ambiente
 
-Crie um arquivo chamado `.env` na raiz do projeto e preencha com as credenciais do seu projeto Supabase:
+Copie `.env.example` para `.env` e preencha com as credenciais reais (veja os comentários de cada variável no próprio arquivo):
 
 ```
-PORT=3000
-SUPABASE_URL=sua_url_do_supabase_aqui
-SUPABASE_ANON_KEY=sua_anon_key_do_supabase_aqui
+PORT, NODE_ENV, CORS_ORIGIN
+DATABASE_URL        # connection string do Postgres — use a do "Session pooler" (Project Settings > Database > Connect)
+ENCRYPTION_KEY
+JWT_ACCESS_SECRET
 ```
+
+### 3. Migrations e primeiro usuário admin
+
+Com `DATABASE_URL` configurada, aplique as migrations do Drizzle e crie o primeiro admin:
+
+```bash
+npm run db:migrate
+npm run db:seed-admin -- "Seu Nome" seu-email@exemplo.com senhaForte123
+```
+
+Sempre que o schema em `src/db/schema.js` mudar, gere uma nova migration com `npm run db:generate` antes de rodar `npm run db:migrate` de novo.
 
 ### 4. Rodando o Servidor
 
@@ -83,7 +108,7 @@ Para iniciar a API em modo de desenvolvimento (com auto-reload):
 npm run dev
 ```
 
-> O servidor iniciará na porta 3000 e o Cron Job será ativado no background.
+> O servidor iniciará na porta 3000 e o Cron Job será ativado no background. Todas as rotas abaixo (exceto as de `/api/auth`) exigem login — veja a seção [Autenticação](#autenticação).
 
 ## Endpoints da API
 

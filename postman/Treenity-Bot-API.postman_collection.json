@@ -1,0 +1,248 @@
+{
+  "info": {
+    "_postman_id": "b7f2a2b0-6b7b-4b4a-9b1a-treenity-bot-api",
+    "name": "Treenity Bot API",
+    "description": "Coleção com todas as rotas da API (auth, dashboard e chat). O login e o refresh preenchem automaticamente a variável {{accessToken}} usada nas demais requisições (auth do tipo Bearer herdada da coleção).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      { "key": "token", "value": "{{accessToken}}", "type": "string" }
+    ]
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000", "type": "string" },
+    { "key": "accessToken", "value": "", "type": "string" },
+    { "key": "meuId", "value": "", "type": "string" },
+    { "key": "conversaId", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "auth": { "type": "noauth" },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"voce@exemplo.com\",\n  \"senha\": \"senhaForte123\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "description": "Não exige autenticação.\n\nCampos obrigatórios do body:\n- email (string, formato de e-mail)\n- senha (string, mínimo 8 caracteres)\n\nRetorna { accessToken, usuario } e grava o refresh token num cookie httpOnly (o Postman guarda o cookie automaticamente para as próximas chamadas no mesmo domínio).\n\nEste request tem um script de teste que salva accessToken e meuId nas variáveis da coleção automaticamente."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "    if (json.success) {",
+                  "        pm.collectionVariables.set('accessToken', json.data.accessToken);",
+                  "        pm.collectionVariables.set('meuId', json.data.usuario.id);",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "auth": { "type": "noauth" },
+            "body": { "mode": "raw", "raw": "" },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/refresh",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "refresh"]
+            },
+            "description": "Não usa Bearer token — usa o cookie httpOnly 'refresh_token' salvo pelo Login (o Postman envia automaticamente). Sem body.\n\nRotaciona o refresh token e emite um novo accessToken. Este request salva o novo accessToken na variável da coleção automaticamente."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "    if (json.success) {",
+                  "        pm.collectionVariables.set('accessToken', json.data.accessToken);",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "auth": { "type": "noauth" },
+            "body": { "mode": "raw", "raw": "" },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/logout",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "logout"]
+            },
+            "description": "Não usa Bearer token — usa o cookie httpOnly 'refresh_token'. Sem body. Revoga a sessão atual (o refresh seguinte com o mesmo cookie passa a falhar)."
+          }
+        },
+        {
+          "name": "Meus dados (me)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "me"]
+            },
+            "description": "Exige Authorization: Bearer {{accessToken}} (herdado da coleção). Sem body. Retorna { id, papel } do usuário autenticado."
+          }
+        },
+        {
+          "name": "Criar usuário (admin only)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nome\": \"Novo Funcionário\",\n  \"email\": \"funcionario@exemplo.com\",\n  \"senha\": \"senhaForte123\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/usuarios",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "usuarios"]
+            },
+            "description": "Exige Authorization: Bearer {{accessToken}} de um usuário com papel 'admin' (herdado da coleção).\n\nCampos obrigatórios do body:\n- nome (string, mínimo 2 caracteres)\n- email (string, formato de e-mail, único)\n- senha (string, mínimo 8 caracteres)\n\nCampo opcional:\n- papel ('admin' ou 'funcionario') — se não enviar, cria como 'funcionario'"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Dashboard",
+      "item": [
+        {
+          "name": "Métricas diárias",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "dashboard"]
+            },
+            "description": "Exige Authorization: Bearer {{accessToken}} (herdado da coleção) — qualquer papel (admin ou funcionario). Sem body. Retorna os últimos 30 dias de métricas consolidadas."
+          }
+        },
+        {
+          "name": "Detalhes das vendas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/vendas?limit=50&status=&canal=",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "dashboard", "vendas"],
+              "query": [
+                { "key": "limit", "value": "50", "description": "Quantidade de vendas retornadas (padrão: 50)" },
+                { "key": "status", "value": "", "description": "Filtra pelo status da venda (ex: 'Aguardando Pagamento', 'Fechada')", "disabled": true },
+                { "key": "canal", "value": "", "description": "Filtra por canal de atendimento (ex: 'Facebook', 'WhatsApp')", "disabled": true }
+              ]
+            },
+            "description": "Exige Authorization: Bearer {{accessToken}} (herdado da coleção) — qualquer papel. Sem body.\n\nQuery params opcionais: limit, status, canal (todos opcionais — desative os que não quiser usar)."
+          }
+        },
+        {
+          "name": "Forçar atualização de métricas (admin only)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": { "mode": "raw", "raw": "" },
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/atualizar",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "dashboard", "atualizar"]
+            },
+            "description": "Exige Authorization: Bearer {{accessToken}} (herdado da coleção) de um usuário com papel 'admin'. Sem body. Recalcula e salva as métricas do dia na hora."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Chat",
+      "item": [
+        {
+          "name": "Iniciar/buscar conversa",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"adminId\": \"{{meuId}}\",\n  \"funcionarioId\": \"COLOQUE_AQUI_O_UUID_DO_OUTRO_USUARIO\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/chat/init",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "chat", "init"]
+            },
+            "description": "Exige Authorization: Bearer {{accessToken}} (herdado da coleção). O usuário autenticado precisa ser um dos dois participantes (adminId ou funcionarioId), senão dá 403.\n\nCampos obrigatórios do body:\n- adminId (uuid — id de um usuário)\n- funcionarioId (uuid — id do outro usuário)\n\n{{meuId}} é preenchido automaticamente pelo Login. Troque o outro campo pelo uuid real do segundo participante (tabela usuarios).\n\nEste request salva o id da conversa criada/encontrada na variável {{conversaId}}, usada no request de histórico."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "    if (json.success) {",
+                  "        pm.collectionVariables.set('conversaId', json.data.id);",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Histórico da conversa",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/chat/history/{{conversaId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "chat", "history", "{{conversaId}}"]
+            },
+            "description": "Exige Authorization: Bearer {{accessToken}} (herdado da coleção). O usuário autenticado precisa ser um dos participantes da conversa, senão dá 403 (ou 404 se o id não existir).\n\nParâmetro de rota:\n- conversaId (uuid) — preenchido automaticamente pelo request 'Iniciar/buscar conversa', ou troque manualmente."
+          }
+        }
+      ]
+    }
+  ]
+}
