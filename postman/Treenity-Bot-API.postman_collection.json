@@ -353,6 +353,32 @@
             },
             "description": "Exige Authorization: Bearer {{accessToken}} (herdado da coleção) — qualquer papel. Sem body.\n\nUsado pelo painel para encerrar manualmente um atendimento sinalizado que não terminou em venda (status_funil = 'Fechada'). É o que faz a IA voltar a atender aquele cliente na próxima mensagem dele.\n\nParâmetro de rota:\n- atendimentoId (uuid) — preenchido automaticamente pelo request 'Sinalizar atendimento (n8n)', ou troque manualmente."
           }
+        },
+        {
+          "name": "Listar atendimentos sinalizados",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/atendimentos/sinalizados",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "atendimentos", "sinalizados"]
+            },
+            "description": "Exige Authorization: Bearer {{accessToken}} (herdado da coleção) — qualquer papel. Sem body.\n\nLista os atendimentos sinalizados que ainda estão abertos ({ id, clienteNome, idFace, canal, motivoAtencao, atencaoSinalizadaEm }) — para o painel montar uma tela de 'conversas precisando de atenção' sem depender só de ter capturado o evento em tempo real."
+          }
+        },
+        {
+          "name": "Mensagens de um atendimento",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/atendimentos/{{atendimentoId}}/mensagens",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "atendimentos", "{{atendimentoId}}", "mensagens"]
+            },
+            "description": "Exige Authorization: Bearer {{accessToken}} (herdado da coleção) — qualquer papel. Sem body.\n\nRetorna { atendimento, mensagens } — o contexto do atendimento (cliente, canal, se está sinalizado) e a transcrição completa (cliente + bot), do mais antigo pro mais recente. É o que permite ir do alerta (que só traz o atendimentoId) direto pra conversa.\n\nParâmetro de rota:\n- atendimentoId (uuid) — preenchido automaticamente pelo request 'Sinalizar atendimento (n8n)', ou troque manualmente."
+          }
         }
       ]
     }

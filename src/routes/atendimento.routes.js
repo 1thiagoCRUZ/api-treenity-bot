@@ -13,4 +13,8 @@ router.post('/sinalizar', requireN8nSecret, asyncHandler(atendimentoController.s
 // atendimento que assumiu manualmente.
 router.post('/:id/encerrar', requireAuth, asyncHandler(atendimentoController.encerrar));
 
+// Leitura, pro painel (fallback caso o deskcomm não tenha isso pronto):
+router.get('/sinalizados', requireAuth, asyncHandler(atendimentoController.listarSinalizados));
+router.get('/:id/mensagens', requireAuth, asyncHandler(atendimentoController.listarMensagens));
+
 export default router;

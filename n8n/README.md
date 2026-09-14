@@ -163,6 +163,7 @@ Assim que o atendimento sinalizado estiver `'Fechada'`, a próxima mensagem daqu
 - Colunas novas em `atendimentos`: `precisa_atencao_humana` (boolean), `motivo_atencao` (texto), `atencao_sinalizada_em` (timestamp).
 - `POST /api/atendimentos/sinalizar` — é exatamente a chamada que a tool do item 1 deve fazer. Header `X-N8N-Secret` (variável `N8N_SHARED_SECRET` no `.env` da API). Body `{ id_face, motivo }`. Acha o atendimento **aberto** daquele cliente, grava a sinalização e emite o evento `atendimento_sinalizado` no namespace `/chat` do Socket.io — é isso que avisa o painel em tempo real. Responde 404 se o cliente não tiver nenhum atendimento aberto.
 - `POST /api/atendimentos/:id/encerrar` — rota para o painel (usuário autenticado, não n8n) fechar manualmente um atendimento sinalizado que não terminou em venda. É a ação descrita no item 2 da retomada automática.
+- `GET /api/atendimentos/sinalizados` e `GET /api/atendimentos/:id/mensagens` — leitura para o painel (não usadas pelo n8n): a lista de atendimentos precisando de atenção agora, e a transcrição completa de um atendimento específico. É o que torna o alerta acionável — sem isso, o `atendimentoId` do evento em tempo real não levaria a lugar nenhum.
 
 ---
 
@@ -172,7 +173,7 @@ Assim que o atendimento sinalizado estiver `'Fechada'`, a próxima mensagem daqu
 |---|---|---|
 | `clientes` | Webhook (upsert por `id_face`), Atualizar Pedido (cep/nome) | Avaliação de IA (via join), API de dashboard |
 | `atendimentos` | Webhook (cria), Cotar Frete (status), Atualizar Pedido (fecha), Avaliação de IA (nota), API (`/api/atendimentos/sinalizar` e `/:id/encerrar`) | API de dashboard |
-| `mensagens` | Webhook (mensagem do cliente), Agente de IA (resposta da IA) | Avaliação de IA (monta a transcrição) |
+| `mensagens` | Webhook (mensagem do cliente), Agente de IA (resposta da IA) | Avaliação de IA (monta a transcrição), API (`GET /api/atendimentos/:id/mensagens`) |
 | `vendas` | Atualizar Pedido | API de dashboard |
 
 O catálogo de produtos não está em nenhuma tabela do Postgres — é lido diretamente do Google Sheets pelo `[Fluxo Busca] | Planilha`. A memória de conversa do LangChain (usada pelo Agente de IA para manter contexto) também é uma tabela própria, separada de `mensagens`.
@@ -216,6 +217,6 @@ Como `id_face` é hoje o identificador central em todas as tabelas (`clientes.id
 
 ## Relação com o resto do projeto
 
-- Esta API (`api-treenity-bot`) só **lê** o que o bot escreve (`clientes`, `atendimentos`, `vendas`); nenhuma mudança nela é necessária para o bot passar a atender pelo WhatsApp, desde que continue escrevendo nas mesmas tabelas.
+- Esta API (`api-treenity-bot`) principalmente **lê** o que o bot escreve (`clientes`, `atendimentos`, `vendas`, `mensagens`); a única escrita que ela faz nessas tabelas é a sinalização/encerramento de atendimento. Nenhuma mudança nela é necessária para o bot passar a atender pelo WhatsApp, desde que continue escrevendo nas mesmas tabelas.
 - O chat interno desta API (`chat_conversas`/`chat_mensagens`) é um sistema separado do `mensagens` do bot — um é conversa cliente↔IA, o outro é funcionário↔funcionário.
-- Hoje não existe nenhuma rota nesta API para ler o conteúdo de `mensagens` (histórico de conversa cliente↔bot) — só o dashboard consolidado. Uma rota como `GET /api/atendimentos/:id/mensagens` seria necessária para qualquer tela que precise mostrar essas conversas.
+- `GET /api/atendimentos/:id/mensagens` e `GET /api/atendimentos/sinalizados` expõem o histórico de conversa cliente↔bot e a lista de atendimentos precisando de atenção. A expectativa é que o **deskcomm monte essa tela com os dados/telas dele próprio** (é o produto de CRM/inbox); essas rotas existem como caminho alternativo caso ele não tenha uma forma de puxar os dados específicos deste bot.

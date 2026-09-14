@@ -48,4 +48,28 @@ export const atendimentoController = {
 
         res.json({ success: true, data: atendimento });
     },
+
+    // Lista os atendimentos sinalizados e ainda abertos — pro painel montar
+    // uma tela de "conversas precisando de atenção" sem depender só do evento.
+    async listarSinalizados(req, res) {
+        const sinalizados = await atendimentoService.listarSinalizados();
+        res.json({ success: true, data: sinalizados });
+    },
+
+    // Transcrição de um atendimento específico — é o que permite ir do alerta
+    // (que só traz o atendimentoId) direto pra conversa real.
+    async listarMensagens(req, res) {
+        const parsedId = z.string().uuid().safeParse(req.params.id);
+        if (!parsedId.success) {
+            return res.status(400).json({ success: false, error: 'ID do atendimento inválido' });
+        }
+
+        const atendimento = await atendimentoService.buscarComCliente(parsedId.data);
+        if (!atendimento) {
+            return res.status(404).json({ success: false, error: 'Atendimento não encontrado' });
+        }
+
+        const mensagens = await atendimentoService.listarMensagens(parsedId.data);
+        res.json({ success: true, data: { atendimento, mensagens } });
+    },
 };

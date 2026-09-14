@@ -136,6 +136,17 @@ export const atendimentos = pgTable(
     (table) => [index('idx_atendimentos_conta').on(table.contaId, table.criadoEm)]
 );
 
+// Log de conversa cliente↔bot (WhatsApp/Facebook/Instagram), escrito pelo n8n.
+// Sem criptografia — diferente de chat_mensagens (chat interno entre funcionários).
+export const mensagens = pgTable('mensagens', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    atendimentoId: uuid('atendimento_id').references(() => atendimentos.id, { onDelete: 'cascade' }),
+    remetente: varchar('remetente'),
+    conteudo: text('conteudo'),
+    enviadoEm: timestamp('enviado_em', { withTimezone: true }).defaultNow(),
+    formato: varchar('formato'),
+});
+
 export const vendas = pgTable('vendas', {
     id: uuid('id').primaryKey().defaultRandom(),
     atendimentoId: uuid('atendimento_id').references(() => atendimentos.id, { onDelete: 'cascade' }),
@@ -177,8 +188,13 @@ export const clientesRelations = relations(clientes, ({ many }) => ({
 export const atendimentosRelations = relations(atendimentos, ({ one, many }) => ({
     cliente: one(clientes, { fields: [atendimentos.clienteId], references: [clientes.id] }),
     vendas: many(vendas),
+    mensagens: many(mensagens),
 }));
 
 export const vendasRelations = relations(vendas, ({ one }) => ({
     atendimento: one(atendimentos, { fields: [vendas.atendimentoId], references: [atendimentos.id] }),
+}));
+
+export const mensagensRelations = relations(mensagens, ({ one }) => ({
+    atendimento: one(atendimentos, { fields: [mensagens.atendimentoId], references: [atendimentos.id] }),
 }));

@@ -96,6 +96,8 @@ O bot de atendimento (n8n — ver `n8n/README.md`) detecta quando um cliente pre
 
 - `POST /api/atendimentos/sinalizar` `{ id_face, motivo }` → marca o atendimento **aberto** daquele cliente como precisando de atenção humana e emite o evento `atendimento_sinalizado` no namespace `/chat` do Socket.io (payload: `{ atendimentoId, clienteNome, canal, motivo, sinalizadoEm }`). Chamada server-to-server, autenticada por `X-N8N-Secret` (segredo próprio, `N8N_SHARED_SECRET`) — nunca por login de usuário. 404 se o cliente não tiver nenhum atendimento aberto.
 - `POST /api/atendimentos/:id/encerrar` → fecha manualmente um atendimento (`status_funil = 'Fechada'`); qualquer usuário autenticado pode chamar. É assim que a IA volta a atender aquele cliente: a próxima mensagem dele abre um atendimento novo, sem a sinalização (mesma regra que já impede dois atendimentos abertos ao mesmo tempo).
+- `GET /api/atendimentos/sinalizados` → lista os atendimentos sinalizados que ainda estão abertos (`clienteNome`, `idFace`, `canal`, `motivo`, `sinalizadoEm`) — pro painel montar uma tela de "conversas precisando de atenção" sem depender só de ter capturado o evento em tempo real no momento exato em que ele disparou.
+- `GET /api/atendimentos/:id/mensagens` → transcrição completa (cliente + bot) de um atendimento específico, do mais antigo pro mais recente, junto com o contexto do atendimento (cliente, canal, se está sinalizado). É o que permite ir do alerta (que só traz o `atendimentoId`) direto pra conversa real — a ideia é o **deskcomm montar essa tela com os dados dele próprio**, mas essas duas rotas existem como caminho alternativo caso ele não tenha isso pronto para os dados deste bot.
 
 Detalhe completo do fluxo (por que existe, o que muda no lado do n8n) em `n8n/README.md`.
 
@@ -132,7 +134,7 @@ O código está dividido por responsabilidades para facilitar a manutenção:
     └── jwt.util.js             # Assinatura/verificação do access token
 ```
 
-Tabelas gerenciadas pelo Drizzle (`src/db/schema.js`, migrations em `drizzle/`): `usuarios`, `refresh_tokens`, `chat_conversas`, `chat_mensagens`, além de `clientes`, `atendimentos`, `vendas` e `dashboard_metrics_diarias`, que já existiam no banco e foram trazidas para o schema.
+Tabelas gerenciadas pelo Drizzle (`src/db/schema.js`, migrations em `drizzle/`): `usuarios`, `refresh_tokens`, `chat_conversas`, `chat_mensagens`, além de `clientes`, `atendimentos`, `vendas`, `mensagens` e `dashboard_metrics_diarias`, que já existiam no banco e foram trazidas para o schema.
 
 ## Como Configurar e Rodar Localmente
 

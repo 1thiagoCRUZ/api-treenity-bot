@@ -81,6 +81,8 @@ server.listen(porta, () => {
     console.log(`   - GET  http://localhost:${porta}/api/chat/history/:conversaId`);
     console.log(`   - POST http://localhost:${porta}/api/atendimentos/sinalizar`);
     console.log(`   - POST http://localhost:${porta}/api/atendimentos/:id/encerrar`);
+    console.log(`   - GET  http://localhost:${porta}/api/atendimentos/sinalizados`);
+    console.log(`   - GET  http://localhost:${porta}/api/atendimentos/:id/mensagens`);
     console.log(`Sockets enabled at /chat namespace`);
     console.log(`======================================================`);
     startCronJobs();
