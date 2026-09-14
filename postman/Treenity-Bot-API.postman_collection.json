@@ -15,7 +15,10 @@
     { "key": "baseUrl", "value": "http://localhost:3000", "type": "string" },
     { "key": "accessToken", "value": "", "type": "string" },
     { "key": "meuId", "value": "", "type": "string" },
-    { "key": "conversaId", "value": "", "type": "string" }
+    { "key": "conversaId", "value": "", "type": "string" },
+    { "key": "ssoSecret", "value": "", "type": "string" },
+    { "key": "n8nSecret", "value": "", "type": "string" },
+    { "key": "atendimentoId", "value": "", "type": "string" }
   ],
   "item": [
     {
@@ -116,6 +119,58 @@
               "path": ["api", "auth", "me"]
             },
             "description": "Exige Authorization: Bearer {{accessToken}} (herdado da coleção). Sem body. Retorna { id, papel } do usuário autenticado."
+          }
+        },
+        {
+          "name": "SSO (integração server-to-server)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-SSO-Secret", "value": "{{ssoSecret}}" }
+            ],
+            "auth": { "type": "noauth" },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"funcionario@empresa.com\",\n  \"nome\": \"Nome do Funcionário\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/sso",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "sso"]
+            },
+            "description": "Simula a chamada que o backend de um sistema externo (ex: deskcomm) faria em nome de um usuário já autenticado lá. NÃO usa Bearer — usa o header X-SSO-Secret (preencha a variável {{ssoSecret}} com o valor de SSO_SHARED_SECRET do .env). Rota desativada (501) se essa variável de ambiente não estiver configurada no servidor.\n\nCampos obrigatórios do body:\n- email (string, formato de e-mail) — chave usada para achar ou criar o usuário\n- nome (string, mínimo 2 caracteres) — só usado na criação; não atualiza o nome em chamadas seguintes\n\nUsuários criados por aqui sempre entram como 'funcionario' (promover a admin é manual, via 'Criar usuário').\n\nEste request salva accessToken e meuId nas variáveis da coleção, igual o Login."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "    if (json.success) {",
+                  "        pm.collectionVariables.set('accessToken', json.data.accessToken);",
+                  "        pm.collectionVariables.set('meuId', json.data.usuario.id);",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar usuários (diretório)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/usuarios",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "usuarios"]
+            },
+            "description": "Exige Authorization: Bearer {{accessToken}} (herdado da coleção) — qualquer papel. Sem body.\n\nRetorna só { id, nome, papel } dos usuários ativos (nunca email/senha) — é a lista usada pra escolher o 'funcionarioId' do request 'Iniciar/buscar conversa', na pasta Chat."
           }
         },
         {
@@ -240,6 +295,63 @@
               "path": ["api", "chat", "history", "{{conversaId}}"]
             },
             "description": "Exige Authorization: Bearer {{accessToken}} (herdado da coleção). O usuário autenticado precisa ser um dos participantes da conversa, senão dá 403 (ou 404 se o id não existir).\n\nParâmetro de rota:\n- conversaId (uuid) — preenchido automaticamente pelo request 'Iniciar/buscar conversa', ou troque manualmente."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Atendimentos",
+      "item": [
+        {
+          "name": "Sinalizar atendimento (n8n)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-N8N-Secret", "value": "{{n8nSecret}}" }
+            ],
+            "auth": { "type": "noauth" },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id_face\": \"COLOQUE_AQUI_O_ID_FACE_DO_CLIENTE\",\n  \"motivo\": \"Cliente pediu desconto 3x e ficou irritado com a recusa\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/atendimentos/sinalizar",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "atendimentos", "sinalizar"]
+            },
+            "description": "Simula a chamada que o n8n faz quando o Agente de IA detecta que o cliente precisa de um humano. NÃO usa Bearer — usa o header X-N8N-Secret (preencha a variável {{n8nSecret}} com o valor de N8N_SHARED_SECRET do .env). Rota desativada (501) se essa variável não estiver configurada no servidor.\n\nCampos obrigatórios do body:\n- id_face (string) — identificador do cliente no canal (mesmo valor usado pelo bot)\n- motivo (string, até 500 caracteres)\n\nMarca o atendimento ABERTO daquele cliente e emite o evento 'atendimento_sinalizado' no namespace /chat do Socket.io. 404 se o cliente não tiver nenhum atendimento aberto.\n\nEste request salva o atendimentoId retornado na variável da coleção, usada no request 'Encerrar atendimento'."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "    if (json.success) {",
+                  "        pm.collectionVariables.set('atendimentoId', json.data.id);",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Encerrar atendimento",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": { "mode": "raw", "raw": "" },
+            "url": {
+              "raw": "{{baseUrl}}/api/atendimentos/{{atendimentoId}}/encerrar",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "atendimentos", "{{atendimentoId}}", "encerrar"]
+            },
+            "description": "Exige Authorization: Bearer {{accessToken}} (herdado da coleção) — qualquer papel. Sem body.\n\nUsado pelo painel para encerrar manualmente um atendimento sinalizado que não terminou em venda (status_funil = 'Fechada'). É o que faz a IA voltar a atender aquele cliente na próxima mensagem dele.\n\nParâmetro de rota:\n- atendimentoId (uuid) — preenchido automaticamente pelo request 'Sinalizar atendimento (n8n)', ou troque manualmente."
           }
         }
       ]

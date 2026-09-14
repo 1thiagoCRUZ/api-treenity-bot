@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
-import { eq } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { usuarios, refreshTokens } from '../db/schema.js';
 import { signAccessToken } from '../utils/jwt.util.js';
@@ -27,6 +27,40 @@ export const authService = {
                 criadoEm: usuarios.criadoEm,
             });
         return usuario;
+    },
+
+    // Usado pela ponte de SSO (integração server-to-server, ex: deskcomm).
+    // Acha o usuário pelo e-mail ou provisiona um novo, sempre como 'funcionario'
+    // — promoção a admin continua sendo uma ação manual dentro deste sistema,
+    // nunca decidida por quem chama o SSO (evita escalonamento de privilégio
+    // caso o segredo compartilhado vaze ou o outro sistema tenha um bug).
+    async encontrarOuCriarPorEmailSso(email, nome) {
+        const emailNormalizado = email.toLowerCase();
+        const [existente] = await db.select().from(usuarios).where(eq(usuarios.email, emailNormalizado)).limit(1);
+        if (existente) return existente;
+
+        // Conta provisionada via SSO nunca loga com senha por aqui — gera um
+        // hash de uma senha aleatória que ninguém conhece, só pra satisfazer
+        // a coluna NOT NULL sem abrir uma forma alternativa de login.
+        const senhaAleatoria = crypto.randomBytes(32).toString('hex');
+        const senhaHash = await bcrypt.hash(senhaAleatoria, SALT_ROUNDS);
+
+        const [novo] = await db
+            .insert(usuarios)
+            .values({ nome, email: emailNormalizado, senhaHash, papel: 'funcionario' })
+            .returning();
+
+        return novo;
+    },
+
+    // "Diretório" interno — usado pelo frontend pra montar o seletor de "com
+    // quem iniciar uma conversa". Só id/nome/papel: nunca email nem senha_hash.
+    async listarUsuarios() {
+        return db
+            .select({ id: usuarios.id, nome: usuarios.nome, papel: usuarios.papel })
+            .from(usuarios)
+            .where(eq(usuarios.ativo, true))
+            .orderBy(asc(usuarios.nome));
     },
 
     async autenticar(email, senha) {

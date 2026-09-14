@@ -126,6 +126,12 @@ export const atendimentos = pgTable(
         contaId: varchar('conta_id'),
         origem: varchar('origem'),
         categoriaComentario: varchar('categoria_comentario'),
+        // Sinalização de atendimento sensível (cliente pedindo desconto
+        // insistentemente, muito irritado, etc.) — enquanto true, a IA do bot
+        // para de responder esse cliente até um humano fechar o atendimento.
+        precisaAtencaoHumana: boolean('precisa_atencao_humana').notNull().default(false),
+        motivoAtencao: varchar('motivo_atencao'),
+        atencaoSinalizadaEm: timestamp('atencao_sinalizada_em', { withTimezone: true }),
     },
     (table) => [index('idx_atendimentos_conta').on(table.contaId, table.criadoEm)]
 );

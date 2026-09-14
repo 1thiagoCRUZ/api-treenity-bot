@@ -13,10 +13,12 @@ import { startCronJobs } from './cron/dashboard.cron.js';
 import authRoutes from './routes/auth.routes.js';
 import dashboardRoutes from './routes/dashboard.routes.js';
 import chatRoutes from './routes/chat.routes.js';
+import atendimentoRoutes from './routes/atendimento.routes.js';
 import { errorHandler } from './middlewares/error.middleware.js';
 import http from 'http';
 import { Server } from 'socket.io';
 import configureChatSockets from './sockets/chat.socket.js';
+import { setIo } from './sockets/realtime.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -47,6 +49,7 @@ const io = new Server(server, {
 
 // Configura os sockets de chat
 configureChatSockets(io);
+setIo(io); // permite que controllers fora do socket (ex: atendimentos) emitam eventos
 const porta = process.env.PORT || 3000;
 
 app.use(cors({ origin: checkOrigin, credentials: true }));
@@ -57,6 +60,7 @@ app.use(express.static(path.join(__dirname, '../public')));
 app.use('/api/auth', authRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/atendimentos', atendimentoRoutes);
 
 app.use(errorHandler);
 
@@ -68,11 +72,15 @@ server.listen(porta, () => {
     console.log(`   - POST http://localhost:${porta}/api/auth/refresh`);
     console.log(`   - POST http://localhost:${porta}/api/auth/logout`);
     console.log(`   - GET  http://localhost:${porta}/api/auth/me`);
+    console.log(`   - POST http://localhost:${porta}/api/auth/sso`);
+    console.log(`   - GET  http://localhost:${porta}/api/auth/usuarios`);
     console.log(`   - GET  http://localhost:${porta}/api/dashboard`);
     console.log(`   - GET  http://localhost:${porta}/api/dashboard/vendas`);
     console.log(`   - POST http://localhost:${porta}/api/dashboard/atualizar`);
     console.log(`   - POST http://localhost:${porta}/api/chat/init`);
     console.log(`   - GET  http://localhost:${porta}/api/chat/history/:conversaId`);
+    console.log(`   - POST http://localhost:${porta}/api/atendimentos/sinalizar`);
+    console.log(`   - POST http://localhost:${porta}/api/atendimentos/:id/encerrar`);
     console.log(`Sockets enabled at /chat namespace`);
     console.log(`======================================================`);
     startCronJobs();

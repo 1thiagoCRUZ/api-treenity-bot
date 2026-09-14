@@ -27,6 +27,11 @@ const criarUsuarioSchema = z.object({
     papel: z.enum(['admin', 'funcionario']).default('funcionario'),
 });
 
+const ssoSchema = z.object({
+    email: z.string().email(),
+    nome: z.string().min(2),
+});
+
 export const authController = {
     async login(req, res) {
         const parsed = loginSchema.safeParse(req.body);
@@ -82,6 +87,44 @@ export const authController = {
 
     async me(req, res) {
         res.json({ success: true, data: req.usuario });
+    },
+
+    // Lista os usuários ativos (id/nome/papel) — qualquer autenticado pode
+    // chamar, é o "diretório" pra escolher com quem iniciar uma conversa.
+    async listarUsuarios(req, res) {
+        const usuarios = await authService.listarUsuarios();
+        res.json({ success: true, data: usuarios });
+    },
+
+    // Chamada server-to-server por um sistema já confiável (ex: backend do
+    // deskcomm), autenticado por segredo compartilhado (ver requireSsoSecret
+    // na rota). Não é uma requisição de navegador — por isso devolve o
+    // refreshToken no corpo da resposta em vez de um cookie (um Set-Cookie
+    // aqui chegaria no backend que chamou, nunca no navegador do usuário
+    // final). Quem integra decide como repassar o accessToken pro frontend
+    // dele; para renovar, é só chamar /api/auth/sso de novo.
+    async sso(req, res) {
+        const parsed = ssoSchema.safeParse(req.body);
+        if (!parsed.success) {
+            return res.status(400).json({ success: false, error: 'email e nome são obrigatórios' });
+        }
+        const { email, nome } = parsed.data;
+
+        const usuario = await authService.encontrarOuCriarPorEmailSso(email, nome);
+        const { accessToken, refreshToken, refreshExpiraEm } = await authService.emitirTokens(
+            usuario,
+            req.headers['user-agent']
+        );
+
+        res.json({
+            success: true,
+            data: {
+                accessToken,
+                refreshToken,
+                refreshExpiraEm,
+                usuario: { id: usuario.id, nome: usuario.nome, email: usuario.email, papel: usuario.papel },
+            },
+        });
     },
 
     // Só admins autenticados podem criar contas (ver requireRole('admin') na rota).

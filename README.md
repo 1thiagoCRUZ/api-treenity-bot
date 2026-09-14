@@ -32,9 +32,72 @@ Todas as rotas de `/api/dashboard` e `/api/chat` exigem um usuário autenticado 
 - `POST /api/auth/refresh` → usa o cookie para rotacionar o refresh token e emitir um novo access token.
 - `POST /api/auth/logout` → revoga o refresh token atual.
 - `GET /api/auth/me` → dados do usuário autenticado (requer Bearer token).
+- `GET /api/auth/usuarios` → lista `{ id, nome, papel }` dos usuários ativos (nunca e-mail/senha) — qualquer autenticado pode chamar; é o diretório usado pra escolher com quem iniciar uma conversa no chat.
 - `POST /api/auth/usuarios` `{ nome, email, senha, papel? }` → cria um usuário; `papel` é opcional (`admin` ou `funcionario`, padrão `funcionario`); só admins autenticados podem chamar.
 
 No Socket.io, conecte informando o token no handshake: `io(url, { auth: { token: accessToken } })`. Sem isso a conexão é recusada.
+
+## Integração externa (SSO) — usando esta API como serviço de outro sistema
+
+Este projeto foi pensado pra continuar existindo como um **serviço próprio**, consumido por outra aplicação (hoje o cenário concreto é o [deskcomm](https://github.com/thalena-lima/deskcomm), que cuidaria do funil de vendas, inbox de WhatsApp e telas). Duas partes desta API viram integração:
+
+- **Dashboard** (`/api/dashboard*`): é só leitura de dados. A outra aplicação simplesmente chama essas rotas pra montar suas próprias telas de métrica — não precisa de nada especial além de autenticação.
+- **Chat interno** (`/api/chat*` + Socket.io): é um sistema vivo (conexões abertas, mensagens em tempo real, criptografia), por isso continua rodando como processo/serviço à parte, e a outra aplicação conecta nele como cliente.
+
+O problema que isso cria: o funcionário já fez login **no outro sistema** (lá, com o método de autenticação dele). Ele não deveria ter que logar de novo aqui só pra ver métricas ou abrir o chat. É pra isso que existe a rota de SSO.
+
+### Como funciona o `POST /api/auth/sso`
+
+É uma "ponte de confiança" **entre backends**, nunca entre o navegador do usuário e esta API diretamente:
+
+```
+1. Funcionário loga no deskcomm (com o sistema de auth deles)
+2. O BACKEND do deskcomm (nunca o navegador) chama:
+
+   POST /api/auth/sso
+   Header:  X-SSO-Secret: <segredo compartilhado, só os dois backends conhecem>
+   Body:    { "email": "funcionario@empresa.com", "nome": "Nome do Funcionário" }
+
+3. Esta API:
+   - confere o segredo (se não bater, 401 — ninguém sem o segredo passa)
+   - procura um usuário com esse e-mail; se não existir, cria um novo com
+     papel "funcionario" (nunca "admin" — promoção continua sendo manual,
+     feita dentro deste sistema, pra ninguém virar admin por engano ou bug
+     do outro lado)
+   - gera um accessToken (JWT, 15min) e um refreshToken (7 dias), do mesmo
+     jeito que um login normal geraria
+
+4. Devolve no corpo da resposta (não em cookie — é uma resposta pro backend
+   do deskcomm, não pro navegador do usuário; um cookie aqui nunca chegaria
+   no navegador de ninguém):
+
+   { "accessToken": "...", "refreshToken": "...", "usuario": { ... } }
+
+5. O backend do deskcomm repassa o accessToken pro frontend dele (na sessão
+   daquele usuário), que passa a usar esse token pra:
+   - chamar GET /api/dashboard, /api/dashboard/vendas (header Authorization)
+   - conectar no Socket.io do chat (io(url, { auth: { token } }))
+```
+
+### Renovando o token
+
+O `accessToken` dura só 15 minutos (igual o de um login normal). Como isso é uma integração server-to-server, o jeito mais simples é o backend do deskcomm **chamar `/api/auth/sso` de novo** quando precisar — não expusemos o fluxo de cookie de `/api/auth/refresh` pra isso porque cookie não atravessa domínios diferentes de servidor pra servidor. O `refreshToken` devolvido no passo 4 fica disponível caso façam sentido evoluir isso depois, mas não é obrigatório usar.
+
+### Segurança — o que isso exige de cuidado
+
+- **`SSO_SHARED_SECRET` nunca pode existir em código de frontend/navegador.** Quem tiver esse segredo consegue gerar um token válido pra qualquer e-mail — por isso essa chamada só pode partir de um backend confiável, nunca do browser do usuário final.
+- A comparação do segredo é em tempo constante (`crypto.timingSafeEqual`), pra não vazar informação por diferença de tempo de resposta.
+- Contas criadas via SSO entram sempre como `funcionario`; virar `admin` é uma ação separada, feita por um admin já existente via `POST /api/auth/usuarios` — o SSO nunca decide isso sozinho.
+- Configure `SSO_SHARED_SECRET` no `.env` (veja `.env.example`) e combine o mesmo valor do lado do deskcomm.
+
+## Atendimentos — sinalização para intervenção humana
+
+O bot de atendimento (n8n — ver `n8n/README.md`) detecta quando um cliente precisa de um humano (pedido insistente de desconto, muito irritado, etc.) e chama esta API para sinalizar o atendimento e avisar o painel em tempo real.
+
+- `POST /api/atendimentos/sinalizar` `{ id_face, motivo }` → marca o atendimento **aberto** daquele cliente como precisando de atenção humana e emite o evento `atendimento_sinalizado` no namespace `/chat` do Socket.io (payload: `{ atendimentoId, clienteNome, canal, motivo, sinalizadoEm }`). Chamada server-to-server, autenticada por `X-N8N-Secret` (segredo próprio, `N8N_SHARED_SECRET`) — nunca por login de usuário. 404 se o cliente não tiver nenhum atendimento aberto.
+- `POST /api/atendimentos/:id/encerrar` → fecha manualmente um atendimento (`status_funil = 'Fechada'`); qualquer usuário autenticado pode chamar. É assim que a IA volta a atender aquele cliente: a próxima mensagem dele abre um atendimento novo, sem a sinalização (mesma regra que já impede dois atendimentos abertos ao mesmo tempo).
+
+Detalhe completo do fluxo (por que existe, o que muda no lado do n8n) em `n8n/README.md`.
 
 ## Estrutura do Projeto
 
@@ -54,13 +117,16 @@ O código está dividido por responsabilidades para facilitar a manutenção:
 │   └── dashboard.cron.js    # Regras de agendamento de tempo (quando rodar)
 ├── middlewares/
 │   ├── auth.middleware.js   # requireAuth / requireRole
+│   ├── sso.middleware.js     # segredo compartilhado do /api/auth/sso
+│   ├── n8n.middleware.js      # segredo compartilhado do /api/atendimentos/sinalizar
 │   ├── asyncHandler.js
 │   └── error.middleware.js
 ├── controllers/              # Lida com a requisição da rota e devolve o JSON
 ├── routes/                   # Mapeamento das URLs (Endpoints) da API
 ├── services/                  # Regras de negócio e consultas ao banco (Drizzle)
 ├── sockets/
-│   └── chat.socket.js        # Autenticação e regras do namespace /chat
+│   ├── chat.socket.js        # Autenticação e regras do namespace /chat
+│   └── realtime.js            # Ponte para emitir eventos fora do socket (ex: alertas de atendimento)
 └── utils/
     ├── crypto.util.js         # Criptografia das mensagens do chat
     └── jwt.util.js             # Assinatura/verificação do access token
@@ -87,6 +153,8 @@ PORT, NODE_ENV, CORS_ORIGIN
 DATABASE_URL        # connection string do Postgres — use a do "Session pooler" (Project Settings > Database > Connect)
 ENCRYPTION_KEY
 JWT_ACCESS_SECRET
+SSO_SHARED_SECRET   # só necessária se algum backend externo (ex: deskcomm) for usar /api/auth/sso
+N8N_SHARED_SECRET   # só necessária se o n8n do bot for usar /api/atendimentos/sinalizar
 ```
 
 ### 3. Migrations e primeiro usuário admin

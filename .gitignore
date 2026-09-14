@@ -5,6 +5,10 @@ node_modules/
 .env
 .env.*
 
+# Exports do n8n contêm tokens/credenciais em texto puro (Facebook, Azure,
+# Frenet) embutidos nos nós — nunca versionar. Ver n8n/README.md.
+n8n/*.json
+
 # Logs
 logs
 *.log

@@ -52,6 +52,8 @@ btnLogin.addEventListener('click', async () => {
             loggedAsText.innerText = `Logado como ${resData.data.usuario.nome} (${resData.data.usuario.papel})`;
             loginArea.style.display = 'none';
             setupArea.style.display = 'block';
+
+            await loadUsuarios();
         } else {
             alert('Erro ao entrar: ' + resData.error);
         }
@@ -64,12 +66,51 @@ btnLogin.addEventListener('click', async () => {
     }
 });
 
+// Busca o diretório de usuários e preenche o seletor "Conversar com"
+// (em vez de exigir que alguém digite o uuid de outra pessoa na mão)
+async function loadUsuarios() {
+    inputTargetId.innerHTML = '<option value="">Carregando...</option>';
+
+    try {
+        const response = await fetch(`${API_BASE}/api/auth/usuarios`, {
+            headers: { 'Authorization': `Bearer ${accessToken}` },
+            credentials: 'include'
+        });
+        const resData = await response.json();
+
+        inputTargetId.innerHTML = '';
+
+        if (!resData.success) {
+            inputTargetId.innerHTML = '<option value="">Erro ao carregar usuários</option>';
+            return;
+        }
+
+        const outros = resData.data.filter(u => u.id !== myId);
+
+        if (outros.length === 0) {
+            inputTargetId.innerHTML = '<option value="">Nenhum outro usuário cadastrado</option>';
+            btnConnect.disabled = true;
+            return;
+        }
+
+        outros.forEach(usuario => {
+            const option = document.createElement('option');
+            option.value = usuario.id;
+            option.innerText = `${usuario.nome} (${usuario.papel})`;
+            inputTargetId.appendChild(option);
+        });
+    } catch (err) {
+        console.error('Erro ao carregar usuários', err);
+        inputTargetId.innerHTML = '<option value="">Erro ao carregar usuários</option>';
+    }
+}
+
 // Etapa 2: iniciar/retomar uma conversa com outro usuário
 btnConnect.addEventListener('click', async () => {
-    targetId = inputTargetId.value.trim();
+    targetId = inputTargetId.value;
 
     if (!targetId) {
-        alert('Informe o ID do destinatário!');
+        alert('Escolha com quem conversar!');
         return;
     }
 
