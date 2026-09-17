@@ -4,6 +4,8 @@ node_modules/
 # Variáveis de ambiente e segredos
 .env
 .env.*
+# ...exceto o template sem segredos reais, que deve ficar versionado
+!.env.example
 
 # Exports do n8n contêm tokens/credenciais em texto puro (Facebook, Azure,
 # Frenet) embutidos nos nós — nunca versionar. Ver n8n/README.md.
