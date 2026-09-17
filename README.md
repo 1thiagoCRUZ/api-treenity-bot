@@ -157,6 +157,7 @@ ENCRYPTION_KEY
 JWT_ACCESS_SECRET
 SSO_SHARED_SECRET   # só necessária se algum backend externo (ex: deskcomm) for usar /api/auth/sso
 N8N_SHARED_SECRET   # só necessária se o n8n do bot for usar /api/atendimentos/sinalizar
+CRON_SHARED_SECRET  # só necessária se algum agendador externo for usar /api/dashboard/atualizar-agendado
 ```
 
 ### 3. Migrations e primeiro usuário admin
@@ -219,6 +220,13 @@ Aciona manualmente o serviço de cálculo sem precisar esperar a próxima execu�
   "message": "Dashboard atualizado à força com sucesso!"
 }
 ```
+
+#### Variante para agendador externo
+
+Mesma ação acima, mas pensada para ser chamada por um agendador externo (ex: o workflow agendado em `.github/workflows/metrics-cron.yml`, que substitui o Cron Job do Render — plano free não suporta esse tipo de serviço lá) em vez de um admin logado.
+
+- **Rota**: `POST /api/dashboard/atualizar-agendado`
+- **Autenticação**: header `X-Cron-Secret` com o valor de `CRON_SHARED_SECRET` (em vez de Bearer token). Sem essa variável configurada no ambiente, a rota responde `501`.
 
 ### Buscar Detalhes das Vendas (com Atendimentos e Clientes)
 

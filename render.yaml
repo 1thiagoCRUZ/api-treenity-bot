@@ -1,5 +1,5 @@
 # Blueprint do Render (https://render.com/docs/blueprint-spec) — define os
-# serviços de staging/produção e o cron de métricas num lugar só, versionado.
+# serviços de staging/produção num lugar só, versionado.
 #
 # `autoDeploy: false` nos dois Web Services é DE PROPÓSITO: sem isso, o Render
 # faz deploy sozinho a cada push, sem esperar o CI passar. Quem aciona o deploy
@@ -9,6 +9,12 @@
 # Variáveis marcadas com `sync: false` não vêm daqui — são preenchidas manualmente
 # no dashboard do Render (Environment → cada serviço), porque são segredos e
 # nunca devem ir pro git. Ver .env.example para o que cada uma significa.
+#
+# NÃO tem serviço `type: cron` aqui: o Render não oferece plano free pra esse
+# tipo de serviço (confirmado na hora de aplicar o blueprint — "free not a
+# valid plan for service type cron"). A consolidação horária de métricas roda
+# via GitHub Actions agendado (.github/workflows/metrics-cron.yml), que é
+# grátis em repo público — ver esse arquivo pra detalhe.
 services:
   - type: web
     name: api-treenity-bot-staging
@@ -32,6 +38,8 @@ services:
       - key: SSO_SHARED_SECRET
         sync: false
       - key: N8N_SHARED_SECRET
+        sync: false
+      - key: CRON_SHARED_SECRET
         sync: false
 
   - type: web
@@ -57,20 +65,5 @@ services:
         sync: false
       - key: N8N_SHARED_SECRET
         sync: false
-
-  # Roda de hora em hora INDEPENDENTE do Web Service estar dormindo por
-  # inatividade (limitação do plano free — ver README). Chama a rota que já
-  # existe em vez de duplicar a lógica de consolidação aqui.
-  - type: cron
-    name: api-treenity-bot-metrics-cron
-    runtime: node
-    plan: free
-    branch: main
-    schedule: "0 * * * *"
-    buildCommand: "true"
-    startCommand: 'curl -sf -X POST "$PROD_URL/api/dashboard/atualizar"'
-    envVars:
-      # URL pública do serviço api-treenity-bot-prod (preencher depois que o
-      # Render gerar o domínio, ex: https://api-treenity-bot-prod.onrender.com).
-      - key: PROD_URL
+      - key: CRON_SHARED_SECRET
         sync: false

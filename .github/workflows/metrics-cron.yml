@@ -1,0 +1,32 @@
+name: Consolidar métricas (agendado)
+
+# Substitui o serviço `type: cron` do Render, que não tem plano free — ver o
+# comentário no topo do render.yaml. Chama a mesma rota que o botão "Forçar
+# atualização" do painel chamaria, só que autenticada por segredo
+# compartilhado em vez de login (ver src/middlewares/cron.middleware.js).
+#
+# Repo público = minutos de Actions ilimitados, então isso não custa nada.
+#
+# GitHub não garante o horário exato de um `schedule` (pode atrasar minutos
+# em período de pico) — para uma consolidação horária de métricas, essa
+# imprecisão não importa.
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch: {} # permite disparar manualmente em Actions → Run workflow
+
+jobs:
+  consolidar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Chama /api/dashboard/atualizar-agendado em produção
+        env:
+          PROD_URL: ${{ vars.PROD_URL }}
+          CRON_SHARED_SECRET: ${{ secrets.CRON_SHARED_SECRET }}
+        run: |
+          if [ -z "$PROD_URL" ]; then
+            echo "::error::A variável de repositório PROD_URL não está configurada (Settings → Secrets and variables → Actions → Variables)."
+            exit 1
+          fi
+          curl -sf -X POST "$PROD_URL/api/dashboard/atualizar-agendado" \
+            -H "X-Cron-Secret: $CRON_SHARED_SECRET"

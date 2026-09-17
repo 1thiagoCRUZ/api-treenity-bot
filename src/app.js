@@ -77,6 +77,7 @@ server.listen(porta, () => {
     console.log(`   - GET  http://localhost:${porta}/api/dashboard`);
     console.log(`   - GET  http://localhost:${porta}/api/dashboard/vendas`);
     console.log(`   - POST http://localhost:${porta}/api/dashboard/atualizar`);
+    console.log(`   - POST http://localhost:${porta}/api/dashboard/atualizar-agendado`);
     console.log(`   - POST http://localhost:${porta}/api/chat/init`);
     console.log(`   - GET  http://localhost:${porta}/api/chat/history/:conversaId`);
     console.log(`   - POST http://localhost:${porta}/api/atendimentos/sinalizar`);
