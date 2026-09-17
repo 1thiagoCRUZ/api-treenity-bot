@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: [main, staging]
+  pull_request:
+    branches: [main, staging]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          cache: "npm"
+
+      - name: Instala dependências (respeitando o package-lock.json)
+        run: npm ci
+
+      - name: Checagem de sintaxe de todos os arquivos .js em src/
+        run: find src -name "*.js" -print0 | xargs -0 -n1 node --check
+
+      - name: Migrations do Drizzle batem com src/db/schema.js?
+        # drizzle-kit generate só lê o schema e os snapshots em drizzle/meta —
+        # não precisa de um Postgres de verdade, por isso um DATABASE_URL
+        # fictício é suficiente aqui (nenhum segredo real entra na CI).
+        env:
+          DATABASE_URL: "postgresql://user:pass@localhost:5432/dummy"
+        run: |
+          npx drizzle-kit generate
+          if ! git diff --exit-code -- drizzle/; then
+            echo "::error::O schema mudou mas a migration não foi gerada/commitada. Rode 'npm run db:generate' localmente e commit o resultado (SQL + drizzle/meta/*.json)."
+            exit 1
+          fi
+
+      - name: Servidor sobe e responde (smoke test, sem banco/segredo real)
+        # Boot completo com valores fictícios: pega qualquer erro de import,
+        # rota mal registrada ou middleware quebrado — sem precisar de acesso
+        # ao Supabase real nem a nenhum segredo de produção.
+        env:
+          PORT: "3000"
+          NODE_ENV: "test"
+          CORS_ORIGIN: "http://localhost:3000"
+          DATABASE_URL: "postgresql://user:pass@localhost:5432/dummy"
+          ENCRYPTION_KEY: "ci-placeholder-key-nao-e-segredo-real"
+          JWT_ACCESS_SECRET: "ci-placeholder-secret-nao-e-segredo-real"
+        run: |
+          node src/app.js &
+          SERVER_PID=$!
+          trap "kill $SERVER_PID 2>/dev/null || true" EXIT
+
+          for i in $(seq 1 20); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/api/auth/me || echo "000")
+            if [ "$STATUS" = "401" ]; then
+              echo "Servidor no ar e respondendo corretamente (401 sem token, como esperado)."
+              exit 0
+            fi
+            sleep 1
+          done
+
+          echo "::error::Servidor não respondeu como esperado em 20s."
+          exit 1
+
+  # Os dois jobs abaixo só rodam depois que `verify` passa (needs: verify) —
+  # código quebrado nunca chega a acionar um deploy. O Render está configurado
+  # com autoDeploy: false (ver render.yaml) exatamente para que só esses jobs,
+  # e não um push direto, disparem o deploy de verdade.
+  #
+  # Cada um usa um "Environment" do GitHub (Settings → Environments, criar
+  # "staging" e "production") com o segredo RENDER_DEPLOY_HOOK_URL próprio —
+  # a URL do Deploy Hook de cada serviço, copiada do dashboard do Render
+  # (Service → Settings → Deploy Hook). Nunca é a mesma URL nos dois.
+  #
+  # Recomendado: em Settings → Environments → production, ligar "Required
+  # reviewers" — aí o deploy de produção fica esperando alguém aprovar antes
+  # de rodar, mesmo com o CI verde. Isso não dá pra configurar por YAML.
+
+  deploy-staging:
+    name: Deploy (staging)
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Aciona o deploy no Render
+        run: curl -sf -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+
+  deploy-production:
+    name: Deploy (production)
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Aciona o deploy no Render
+        run: curl -sf -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"

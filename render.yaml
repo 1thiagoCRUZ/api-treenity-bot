@@ -1,0 +1,76 @@
+# Blueprint do Render (https://render.com/docs/blueprint-spec) — define os
+# serviços de staging/produção e o cron de métricas num lugar só, versionado.
+#
+# `autoDeploy: false` nos dois Web Services é DE PROPÓSITO: sem isso, o Render
+# faz deploy sozinho a cada push, sem esperar o CI passar. Quem aciona o deploy
+# é o GitHub Actions (.github/workflows/ci.yml), só depois que o job `verify`
+# fica verde — ver a seção "Deploy" do README.
+#
+# Variáveis marcadas com `sync: false` não vêm daqui — são preenchidas manualmente
+# no dashboard do Render (Environment → cada serviço), porque são segredos e
+# nunca devem ir pro git. Ver .env.example para o que cada uma significa.
+services:
+  - type: web
+    name: api-treenity-bot-staging
+    runtime: node
+    plan: free
+    branch: staging
+    buildCommand: npm ci
+    startCommand: npm start
+    autoDeploy: false
+    envVars:
+      - key: NODE_ENV
+        value: staging
+      - key: CORS_ORIGIN
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        sync: false
+      - key: SSO_SHARED_SECRET
+        sync: false
+      - key: N8N_SHARED_SECRET
+        sync: false
+
+  - type: web
+    name: api-treenity-bot-prod
+    runtime: node
+    plan: free
+    branch: main
+    buildCommand: npm ci
+    startCommand: npm start
+    autoDeploy: false
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CORS_ORIGIN
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        sync: false
+      - key: SSO_SHARED_SECRET
+        sync: false
+      - key: N8N_SHARED_SECRET
+        sync: false
+
+  # Roda de hora em hora INDEPENDENTE do Web Service estar dormindo por
+  # inatividade (limitação do plano free — ver README). Chama a rota que já
+  # existe em vez de duplicar a lógica de consolidação aqui.
+  - type: cron
+    name: api-treenity-bot-metrics-cron
+    runtime: node
+    plan: free
+    branch: main
+    schedule: "0 * * * *"
+    buildCommand: "true"
+    startCommand: 'curl -sf -X POST "$PROD_URL/api/dashboard/atualizar"'
+    envVars:
+      # URL pública do serviço api-treenity-bot-prod (preencher depois que o
+      # Render gerar o domínio, ex: https://api-treenity-bot-prod.onrender.com).
+      - key: PROD_URL
+        sync: false
