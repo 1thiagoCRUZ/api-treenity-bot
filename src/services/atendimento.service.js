@@ -78,10 +78,14 @@ export const atendimentoService = {
     // Encerra manualmente um atendimento (sem passar pelo fechamento de venda).
     // Ao virar 'Fechada', a próxima mensagem daquele cliente abre um
     // atendimento novo (sem sinalização) — é assim que a IA volta a responder.
+    // `precisaAtencaoHumana` também zera aqui: `listarSinalizados` já filtra por
+    // `statusFunil != 'Fechada'` e não precisaria disso, mas quem lê o campo
+    // direto (ex: a tela de transcrição do deskcomm) senão continuaria vendo
+    // "precisa de atenção" num atendimento que acabou de ser fechado.
     async encerrar(atendimentoId) {
         const [atualizado] = await db
             .update(atendimentos)
-            .set({ statusFunil: 'Fechada', atualizadoEm: new Date() })
+            .set({ statusFunil: 'Fechada', precisaAtencaoHumana: false, atualizadoEm: new Date() })
             .where(eq(atendimentos.id, atendimentoId))
             .returning();
 
