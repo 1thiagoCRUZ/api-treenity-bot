@@ -9,6 +9,14 @@ const idsSchema = z.object({
 const conversaIdSchema = z.string().uuid();
 
 export const chatController = {
+    // Lista as conversas do usuário autenticado (com o outro participante e a
+    // última mensagem), pra montar a lista lateral do chat sem adivinhar quem
+    // já tem histórico. O usuário vem do token, nunca de parâmetro.
+    async listarConversas(req, res) {
+        const conversas = await chatService.listarConversasDoUsuario(req.usuario.id);
+        res.json({ success: true, data: conversas });
+    },
+
     // Rota para buscar o histórico ou criar uma conversa
     async initChat(req, res) {
         const parsed = idsSchema.safeParse(req.body);

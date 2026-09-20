@@ -90,6 +90,14 @@ O `accessToken` dura só 15 minutos (igual o de um login normal). Como isso é u
 - Contas criadas via SSO entram sempre como `funcionario`; virar `admin` é uma ação separada, feita por um admin já existente via `POST /api/auth/usuarios` — o SSO nunca decide isso sozinho.
 - Configure `SSO_SHARED_SECRET` no `.env` (veja `.env.example`) e combine o mesmo valor do lado do deskcomm.
 
+## Chat interno — conversas
+
+Além do Socket.io (namespace `/chat`), o chat tem três rotas REST, todas com `Authorization: Bearer <accessToken>` e restritas às conversas de que o usuário autenticado participa:
+
+- `GET /api/chat/conversas` → lista as conversas do usuário, da mais recente pra mais antiga: `[{ id, atualizadoEm, outroUsuario: { id, nome, papel }, ultimaMensagem: { id, remetenteId, conteudo, criadoEm } | null }]`. `conteudo` vem descriptografado e truncado em 140 caracteres (`null` se a mensagem estiver ilegível); `ultimaMensagem` é `null` em conversa aberta que ainda não teve mensagem. Conversas cujo outro participante não existe mais ou está inativo ficam de fora. Serve pra montar a lista lateral do chat.
+- `POST /api/chat/init` `{ adminId, funcionarioId }` → busca ou cria a conversa entre dois usuários (o autenticado precisa ser um deles).
+- `GET /api/chat/history/:conversaId` → histórico completo, descriptografado, do mais antigo pro mais novo.
+
 ## Atendimentos — sinalização para intervenção humana
 
 O bot de atendimento (n8n — ver `n8n/README.md`) detecta quando um cliente precisa de um humano (pedido insistente de desconto, muito irritado, etc.) e chama esta API para sinalizar o atendimento e avisar o painel em tempo real.

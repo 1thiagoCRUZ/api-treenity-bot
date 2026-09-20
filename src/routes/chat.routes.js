@@ -7,6 +7,9 @@ const router = Router();
 
 router.use(requireAuth);
 
+// Conversas do usuário autenticado, da mais recente pra mais antiga, com a última mensagem
+router.get('/conversas', asyncHandler(chatController.listarConversas));
+
 // Inicia um chat (busca ou cria) — só entre o usuário autenticado e outro participante
 router.post('/init', asyncHandler(chatController.initChat));
 

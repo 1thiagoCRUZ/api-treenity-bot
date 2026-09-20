@@ -249,6 +249,19 @@
       "name": "Chat",
       "item": [
         {
+          "name": "Listar minhas conversas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/chat/conversas",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "chat", "conversas"]
+            },
+            "description": "Exige Authorization: Bearer {{accessToken}} (herdado da coleção). Devolve as conversas de que o usuário autenticado participa, da mais recente pra mais antiga, cada uma com o outro participante e a última mensagem (conteúdo descriptografado, truncado em 140 caracteres; ultimaMensagem é null se ainda não houve mensagem). Conversas cujo outro participante não existe mais ou está inativo não aparecem."
+          }
+        },
+        {
           "name": "Iniciar/buscar conversa",
           "request": {
             "method": "POST",

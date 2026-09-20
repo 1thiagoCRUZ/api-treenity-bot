@@ -1,9 +1,84 @@
-import { and, eq, or } from 'drizzle-orm';
+import { and, desc, eq, inArray, or } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { chatConversas, chatMensagens } from '../db/schema.js';
+import { chatConversas, chatMensagens, usuarios } from '../db/schema.js';
 import { encrypt, decrypt } from '../utils/crypto.util.js';
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const PREVIA_MAX_CARACTERES = 140;
+
+function montarPrevia(conteudoCriptografado) {
+    try {
+        const texto = decrypt(conteudoCriptografado);
+        return texto.length > PREVIA_MAX_CARACTERES ? `${texto.slice(0, PREVIA_MAX_CARACTERES)}…` : texto;
+    } catch {
+        // Uma mensagem ilegível (ex: chave de criptografia diferente) não pode derrubar a lista inteira.
+        return null;
+    }
+}
+
 export const chatService = {
+    // Conversas de que o usuário participa, da mais recente pra mais antiga, cada
+    // uma com o outro participante e a última mensagem (prévia já descriptografada).
+    // Ficam de fora conversas cujo outro lado não existe mais ou foi desativado
+    // (ex: registros antigos com id que não é de usuário) — não há com quem abri-las.
+    async listarConversasDoUsuario(usuarioId) {
+        const conversas = await db
+            .select()
+            .from(chatConversas)
+            .where(or(eq(chatConversas.adminId, usuarioId), eq(chatConversas.funcionarioId, usuarioId)))
+            .orderBy(desc(chatConversas.atualizadoEm));
+
+        if (conversas.length === 0) return [];
+
+        const outroDe = (c) => (c.adminId === usuarioId ? c.funcionarioId : c.adminId);
+        // Só ids em formato uuid entram na consulta: usuarios.id é uuid e um valor
+        // fora do formato faria o Postgres recusar a query inteira.
+        const outrosIds = [...new Set(conversas.map(outroDe).filter((id) => UUID_REGEX.test(id)))];
+
+        const outros = outrosIds.length
+            ? await db
+                  .select({ id: usuarios.id, nome: usuarios.nome, papel: usuarios.papel })
+                  .from(usuarios)
+                  .where(and(inArray(usuarios.id, outrosIds), eq(usuarios.ativo, true)))
+            : [];
+        const outroPorId = new Map(outros.map((u) => [u.id, u]));
+
+        const ultimas = await db
+            .selectDistinctOn([chatMensagens.conversaId], {
+                id: chatMensagens.id,
+                conversaId: chatMensagens.conversaId,
+                remetenteId: chatMensagens.remetenteId,
+                conteudoCriptografado: chatMensagens.conteudoCriptografado,
+                criadoEm: chatMensagens.criadoEm,
+            })
+            .from(chatMensagens)
+            .where(inArray(chatMensagens.conversaId, conversas.map((c) => c.id)))
+            .orderBy(chatMensagens.conversaId, desc(chatMensagens.criadoEm));
+        const ultimaPorConversa = new Map(ultimas.map((m) => [m.conversaId, m]));
+
+        return conversas.flatMap((c) => {
+            const outroUsuario = outroPorId.get(outroDe(c));
+            if (!outroUsuario) return [];
+
+            const ultima = ultimaPorConversa.get(c.id);
+            return [
+                {
+                    id: c.id,
+                    atualizadoEm: c.atualizadoEm,
+                    outroUsuario,
+                    ultimaMensagem: ultima
+                        ? {
+                              id: ultima.id,
+                              remetenteId: ultima.remetenteId,
+                              conteudo: montarPrevia(ultima.conteudoCriptografado),
+                              criadoEm: ultima.criadoEm,
+                          }
+                        : null,
+                },
+            ];
+        });
+    },
+
     // Busca uma conversa pelo ID (usado para checar quem são os participantes)
     async getConversaById(id) {
         const [conversa] = await db.select().from(chatConversas).where(eq(chatConversas.id, id)).limit(1);
