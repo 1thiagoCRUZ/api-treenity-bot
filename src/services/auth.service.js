@@ -37,7 +37,23 @@ export const authService = {
     async encontrarOuCriarPorEmailSso(email, nome) {
         const emailNormalizado = email.toLowerCase();
         const [existente] = await db.select().from(usuarios).where(eq(usuarios.email, emailNormalizado)).limit(1);
-        if (existente) return existente;
+        if (existente) {
+            // O nome é do sistema de origem e pode mudar (ex: a pessoa renomeia o
+            // perfil no deskcomm) — sem isso o nome gravado no primeiro login
+            // ficaria pra sempre e duas contas "Dono" viravam indistinguíveis na
+            // lista do chat. Quando o outro lado não tem nome próprio ele manda o
+            // e-mail no lugar, e isso não pode sobrescrever um nome de verdade.
+            const nomeNovo = (nome ?? '').trim().slice(0, 100);
+            if (nomeNovo && nomeNovo.toLowerCase() !== emailNormalizado && nomeNovo !== existente.nome) {
+                const [atualizado] = await db
+                    .update(usuarios)
+                    .set({ nome: nomeNovo })
+                    .where(eq(usuarios.id, existente.id))
+                    .returning();
+                return atualizado;
+            }
+            return existente;
+        }
 
         // Conta provisionada via SSO nunca loga com senha por aqui — gera um
         // hash de uma senha aleatória que ninguém conhece, só pra satisfazer

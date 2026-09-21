@@ -64,6 +64,10 @@ O problema que isso cria: o funcionário já fez login **no outro sistema** (lá
      papel "funcionario" (nunca "admin" — promoção continua sendo manual,
      feita dentro deste sistema, pra ninguém virar admin por engano ou bug
      do outro lado)
+   - se o usuário já existe e o `nome` recebido é diferente do gravado, atualiza
+     o nome (quem renomeia o perfil no deskcomm aparece com o nome novo na lista
+     do chat). Um `nome` vazio ou igual ao e-mail — o que o outro lado manda
+     quando a pessoa não tem nome — nunca sobrescreve um nome de verdade
    - gera um accessToken (JWT, 15min) e um refreshToken (7 dias), do mesmo
      jeito que um login normal geraria
 
