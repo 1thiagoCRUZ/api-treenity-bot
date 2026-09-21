@@ -1,5 +1,6 @@
 import { chatService } from '../services/chat.service.js';
 import { verifyAccessToken } from '../utils/jwt.util.js';
+import { SALA_DO_PAINEL } from './realtime.js';
 
 export default function configureChatSockets(io) {
     const chatNamespace = io.of('/chat');
@@ -13,7 +14,7 @@ export default function configureChatSockets(io) {
         }
         try {
             const payload = verifyAccessToken(token);
-            socket.usuario = { id: payload.sub, papel: payload.papel };
+            socket.usuario = { id: payload.sub, papel: payload.papel, painelAdmin: payload.painelAdmin === true };
             next();
         } catch (error) {
             next(new Error('Token inválido ou expirado'));
@@ -22,6 +23,17 @@ export default function configureChatSockets(io) {
 
     chatNamespace.on('connection', (socket) => {
         console.log(`[Socket] Cliente conectado: ${socket.id} (usuário ${socket.usuario.id})`);
+
+        // Avisos em tempo real de mensagens/atendimentos/vendas: só o painel admin
+        // (mesma regra de requirePainelAdmin). A sala é decidida aqui, no servidor,
+        // a partir do token — o cliente não escolhe entrar nela.
+        if (socket.usuario.painelAdmin || socket.usuario.papel === 'admin') {
+            socket.join(SALA_DO_PAINEL);
+            // Confirma ao cliente que ele está na sala. É o que permite a um painel
+            // saber que está "ao vivo" de verdade (e não só com o socket aberto) e
+            // relaxar o polling de reserva.
+            socket.emit('painel_pronto');
+        }
 
         // Evento para entrar em uma sala de conversa específica
         socket.on('join_chat', async ({ adminId, funcionarioId, conversaId }) => {

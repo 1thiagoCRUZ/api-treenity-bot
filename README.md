@@ -110,6 +110,18 @@ O `accessToken` dura só 15 minutos (igual o de um login normal). Como isso é u
 - O painel admin também inclui `GET /api/dashboard/vendas` (ver a seção do dashboard).
 - **Paginação por cursor:** o cursor é opaco (não monte à mão). Ele guarda a última atividade com precisão de microssegundo, então linhas gravadas no mesmo milissegundo (o n8n grava várias por segundo) não são puladas nem repetidas.
 
+### Painel admin — tempo real
+
+O painel recebe avisos ao vivo quando o n8n grava mensagens, atendimentos ou vendas — sem polling.
+
+- **Como funciona:** o n8n grava direto no Postgres (não passa por esta API), então o gancho é do banco. Triggers (`drizzle/0006_painel_tempo_real.sql`) fazem `pg_notify('treenity_painel', ...)` a cada gravação; o bot mantém **uma conexão dedicada em `LISTEN`** (`src/realtime/painel-listener.js`) e converte cada aviso num evento Socket.io. Nada muda no n8n.
+- **Evento:** `painel_evento` no namespace `/chat`, com `{ tipo: 'mensagem' | 'atendimento' | 'venda', op: 'INSERT' | 'UPDATE' | 'DELETE', id, atendimentoId }`. **Só ids** — nenhum dado de cliente trafega no aviso; o painel busca os detalhes pela API, que confere a permissão. Mensagens só geram `INSERT`.
+- **Quem recebe:** só sockets cujo token tem a claim `painelAdmin` (ou é admin do bot). A sala (`painel-admin`) é decidida pelo servidor no handshake — o cliente não escolhe entrar. Funcionário sem a claim não recebe nada. Quem entra na sala recebe o evento `painel_pronto`, que confirma que os avisos vão chegar (o cliente pode então relaxar o polling de reserva).
+- **`{ tipo: 'reconectado' }`:** enviado quando o `LISTEN` cai e volta (heartbeat de 30 s, reconexão com espera crescente de 1 a 30 s). Avisos emitidos enquanto a conexão estava fora se perdem, então o painel deve buscar tudo de novo ao receber este evento.
+- **Latência medida:** poucos milissegundos do banco ao socket.
+- **Render free:** com o serviço dormindo o `LISTEN` também dorme; ao acordar ele reconecta e manda `reconectado`. Mantenha um polling de reserva no cliente.
+- **Requisito:** `LISTEN` precisa de conexão de sessão — a `DATABASE_URL` do Session Pooler do Supabase serve; o pooler em modo transação, não.
+
 ## Chat interno — conversas
 
 Além do Socket.io (namespace `/chat`), o chat tem três rotas REST, todas com `Authorization: Bearer <accessToken>` e restritas às conversas de que o usuário autenticado participa:

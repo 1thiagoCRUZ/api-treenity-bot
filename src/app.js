@@ -19,6 +19,7 @@ import http from 'http';
 import { Server } from 'socket.io';
 import configureChatSockets from './sockets/chat.socket.js';
 import { setIo } from './sockets/realtime.js';
+import { iniciarPainelListener } from './realtime/painel-listener.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -89,6 +90,7 @@ server.listen(porta, () => {
     console.log(`Sockets enabled at /chat namespace`);
     console.log(`======================================================`);
     startCronJobs();
+    iniciarPainelListener(); // tempo real do painel admin (LISTEN no banco -> Socket.io)
 });
 
 export default app;
