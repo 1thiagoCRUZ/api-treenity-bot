@@ -132,7 +132,7 @@
             "auth": { "type": "noauth" },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"funcionario@empresa.com\",\n  \"nome\": \"Nome do Funcionário\"\n}",
+              "raw": "{\n  \"email\": \"funcionario@empresa.com\",\n  \"nome\": \"Nome do Funcionário\",\n  \"painel_admin\": true\n}",
               "options": { "raw": { "language": "json" } }
             },
             "url": {
@@ -140,7 +140,7 @@
               "host": ["{{baseUrl}}"],
               "path": ["api", "auth", "sso"]
             },
-            "description": "Simula a chamada que o backend de um sistema externo (ex: deskcomm) faria em nome de um usuário já autenticado lá. NÃO usa Bearer — usa o header X-SSO-Secret (preencha a variável {{ssoSecret}} com o valor de SSO_SHARED_SECRET do .env). Rota desativada (501) se essa variável de ambiente não estiver configurada no servidor.\n\nCampos obrigatórios do body:\n- email (string, formato de e-mail) — chave usada para achar ou criar o usuário\n- nome (string, mínimo 2 caracteres) — só usado na criação; não atualiza o nome em chamadas seguintes\n\nUsuários criados por aqui sempre entram como 'funcionario' (promover a admin é manual, via 'Criar usuário').\n\nEste request salva accessToken e meuId nas variáveis da coleção, igual o Login."
+            "description": "Simula a chamada que o backend de um sistema externo (ex: deskcomm) faria em nome de um usuário já autenticado lá. NÃO usa Bearer — usa o header X-SSO-Secret (preencha a variável {{ssoSecret}} com o valor de SSO_SHARED_SECRET do .env). Rota desativada (501) se essa variável de ambiente não estiver configurada no servidor.\n\nCampos obrigatórios do body:\n- email (string, formato de e-mail) — chave usada para achar ou criar o usuário\n- nome (string, mínimo 2 caracteres) — usado na criação e, se for diferente do gravado, atualiza o nome (vazio ou igual ao e-mail nunca sobrescreve)\n\nCampo opcional:\n- painel_admin (boolean) — o sistema de origem afirma que a pessoa é admin lá; o token ganha a claim painelAdmin, que abre só a leitura de vendas e da lista de atendimentos. O papel continua 'funcionario'.\n\nUsuários criados por aqui sempre entram como 'funcionario' (promover a admin é manual, via 'Criar usuário').\n\nEste request salva accessToken e meuId nas variáveis da coleção, igual o Login."
           },
           "event": [
             {
@@ -223,10 +223,13 @@
               "query": [
                 { "key": "limit", "value": "50", "description": "Quantidade de vendas retornadas (padrão: 50)" },
                 { "key": "status", "value": "", "description": "Filtra pelo status da venda (ex: 'Aguardando Pagamento', 'Fechada')", "disabled": true },
-                { "key": "canal", "value": "", "description": "Filtra por canal de atendimento (ex: 'Facebook', 'WhatsApp')", "disabled": true }
+                { "key": "canal", "value": "", "description": "Filtra por canal de atendimento (ex: 'Facebook', 'WhatsApp')", "disabled": true },
+                { "key": "desde", "value": "", "description": "Data inicial da venda (inclusiva), ex: 2026-09-01", "disabled": true },
+                { "key": "ate", "value": "", "description": "Data final da venda (exclusiva), ex: 2026-10-01", "disabled": true },
+                { "key": "cursor", "value": "", "description": "proximo_cursor da resposta anterior (próxima página)", "disabled": true }
               ]
             },
-            "description": "Exige Authorization: Bearer {{accessToken}} (herdado da coleção) — qualquer papel. Sem body.\n\nQuery params opcionais: limit, status, canal (todos opcionais — desative os que não quiser usar)."
+            "description": "Exige Authorization: Bearer {{accessToken}} (herdado da coleção) — só painel admin (token do SSO com painel_admin: true, ou admin do bot; senão 403). Sem body.\n\nQuery params opcionais: limit (máx. 200), cursor, status, canal, desde, ate (todos opcionais — desative os que não quiser usar)."
           }
         },
         {
@@ -365,6 +368,28 @@
               "path": ["api", "atendimentos", "{{atendimentoId}}", "encerrar"]
             },
             "description": "Exige Authorization: Bearer {{accessToken}} (herdado da coleção) — qualquer papel. Sem body.\n\nUsado pelo painel para encerrar manualmente um atendimento sinalizado que não terminou em venda (status_funil = 'Fechada'). É o que faz a IA voltar a atender aquele cliente na próxima mensagem dele.\n\nParâmetro de rota:\n- atendimentoId (uuid) — preenchido automaticamente pelo request 'Sinalizar atendimento (n8n)', ou troque manualmente."
+          }
+        },
+        {
+          "name": "Listar atendimentos (painel admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/atendimentos?limit=30",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "atendimentos"],
+              "query": [
+                { "key": "limit", "value": "30", "description": "Itens por página (padrão 30, máx. 100)" },
+                { "key": "canal", "value": "", "description": "Ex: Instagram, Facebook, WhatsApp", "disabled": true },
+                { "key": "etapa", "value": "", "description": "Etapa do funil, ex: Proposta, Fechada", "disabled": true },
+                { "key": "com_venda", "value": "true", "description": "true = só com venda; false = só sem venda", "disabled": true },
+                { "key": "desde", "value": "", "description": "Última atividade a partir de (inclusivo)", "disabled": true },
+                { "key": "ate", "value": "", "description": "Última atividade até (exclusivo)", "disabled": true },
+                { "key": "cursor", "value": "", "description": "proximoCursor da resposta anterior (próxima página)", "disabled": true }
+              ]
+            },
+            "description": "Exige Authorization: Bearer {{accessToken}} de um token com a claim painelAdmin (SSO com painel_admin: true) ou de um admin do bot; senão 403. Lista todos os atendimentos (cliente ↔ IA), do mais ativo pro menos, com cliente, canal, etapa do funil, nota da IA, total de mensagens, última mensagem (prévia de 140 caracteres) e a venda, se houver. Resposta: { success, data, proximoCursor } — proximoCursor null na última página."
           }
         },
         {

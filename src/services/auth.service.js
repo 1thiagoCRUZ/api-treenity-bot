@@ -96,8 +96,11 @@ export const authService = {
 
     // Emite um novo par access token (JWT, 15min) + refresh token (opaco, 7 dias,
     // guardado com hash no banco — permite revogar sessões sem depender do JWT).
-    async emitirTokens(usuario, userAgent) {
-        const accessToken = signAccessToken(usuario);
+    // `claims` só entram no access token (curto, 15 min) — nunca no refresh token,
+    // então uma renovação por refresh volta ao acesso normal e a permissão extra
+    // só existe enquanto o sistema de origem a reafirmar num novo SSO.
+    async emitirTokens(usuario, userAgent, claims = {}) {
+        const accessToken = signAccessToken(usuario, claims);
         const refreshTokenPlano = crypto.randomBytes(48).toString('hex');
         const expiraEm = new Date(Date.now() + REFRESH_TOKEN_TTL_MS);
 

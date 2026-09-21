@@ -138,26 +138,41 @@ export const atendimentos = pgTable(
 
 // Log de conversa cliente↔bot (WhatsApp/Facebook/Instagram), escrito pelo n8n.
 // Sem criptografia — diferente de chat_mensagens (chat interno entre funcionários).
-export const mensagens = pgTable('mensagens', {
-    id: uuid('id').primaryKey().defaultRandom(),
-    atendimentoId: uuid('atendimento_id').references(() => atendimentos.id, { onDelete: 'cascade' }),
-    remetente: varchar('remetente'),
-    conteudo: text('conteudo'),
-    enviadoEm: timestamp('enviado_em', { withTimezone: true }).defaultNow(),
-    formato: varchar('formato'),
-});
+export const mensagens = pgTable(
+    'mensagens',
+    {
+        id: uuid('id').primaryKey().defaultRandom(),
+        atendimentoId: uuid('atendimento_id').references(() => atendimentos.id, { onDelete: 'cascade' }),
+        remetente: varchar('remetente'),
+        conteudo: text('conteudo'),
+        enviadoEm: timestamp('enviado_em', { withTimezone: true }).defaultNow(),
+        formato: varchar('formato'),
+    },
+    // Transcrição de um atendimento, "última mensagem" e contagem por atendimento
+    // (lista do painel): sem isso cada uma varreria a tabela inteira.
+    (table) => [index('idx_mensagens_atendimento').on(table.atendimentoId, table.enviadoEm)]
+);
 
-export const vendas = pgTable('vendas', {
-    id: uuid('id').primaryKey().defaultRandom(),
-    atendimentoId: uuid('atendimento_id').references(() => atendimentos.id, { onDelete: 'cascade' }),
-    itensPedido: text('itens_pedido'),
-    valorProdutos: numeric('valor_produtos', { precision: 10, scale: 2, mode: 'number' }),
-    valorFrete: numeric('valor_frete', { precision: 10, scale: 2, mode: 'number' }),
-    valorTotal: numeric('valor_total', { precision: 10, scale: 2, mode: 'number' }),
-    transportadora: varchar('transportadora'),
-    statusVenda: varchar('status_venda').default('Aguardando Pagamento'),
-    criadoEm: timestamp('criado_em', { withTimezone: true }).defaultNow(),
-});
+export const vendas = pgTable(
+    'vendas',
+    {
+        id: uuid('id').primaryKey().defaultRandom(),
+        atendimentoId: uuid('atendimento_id').references(() => atendimentos.id, { onDelete: 'cascade' }),
+        itensPedido: text('itens_pedido'),
+        valorProdutos: numeric('valor_produtos', { precision: 10, scale: 2, mode: 'number' }),
+        valorFrete: numeric('valor_frete', { precision: 10, scale: 2, mode: 'number' }),
+        valorTotal: numeric('valor_total', { precision: 10, scale: 2, mode: 'number' }),
+        transportadora: varchar('transportadora'),
+        statusVenda: varchar('status_venda').default('Aguardando Pagamento'),
+        criadoEm: timestamp('criado_em', { withTimezone: true }).defaultNow(),
+    },
+    (table) => [
+        // "Tem venda?" e vendas por atendimento (lista de atendimentos do painel).
+        index('idx_vendas_atendimento').on(table.atendimentoId),
+        // Paginação por cursor da lista de vendas (mais recentes primeiro).
+        index('idx_vendas_criado').on(table.criadoEm, table.id),
+    ]
+);
 
 export const dashboardMetricsDiarias = pgTable('dashboard_metrics_diarias', {
     dataReferencia: date('data_referencia').primaryKey(),

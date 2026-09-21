@@ -81,6 +81,7 @@ server.listen(porta, () => {
     console.log(`   - GET  http://localhost:${porta}/api/chat/conversas`);
     console.log(`   - POST http://localhost:${porta}/api/chat/init`);
     console.log(`   - GET  http://localhost:${porta}/api/chat/history/:conversaId`);
+    console.log(`   - GET  http://localhost:${porta}/api/atendimentos`);
     console.log(`   - POST http://localhost:${porta}/api/atendimentos/sinalizar`);
     console.log(`   - POST http://localhost:${porta}/api/atendimentos/:id/encerrar`);
     console.log(`   - GET  http://localhost:${porta}/api/atendimentos/sinalizados`);

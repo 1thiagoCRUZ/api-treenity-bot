@@ -1,8 +1,134 @@
-import { and, asc, desc, eq, ne } from 'drizzle-orm';
+import { and, asc, count, desc, eq, exists, gte, inArray, lt, ne, notExists, or, sql, sum } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { atendimentos, clientes, mensagens } from '../db/schema.js';
+import { atendimentos, clientes, mensagens, vendas } from '../db/schema.js';
+import { codificarCursor } from '../utils/cursor.util.js';
+
+const LISTA_LIMITE_PADRAO = 30;
+const LISTA_LIMITE_MAXIMO = 100;
+const PREVIA_MAX_CARACTERES = 140;
+
+// "Última atividade" do atendimento: a mesma coluna que o n8n atualiza a cada
+// mensagem. O coalesce evita que uma linha sem `atualizado_em` (a coluna aceita
+// null) quebre a ordenação e o cursor.
+const atividadeEm = sql`coalesce(${atendimentos.atualizadoEm}, ${atendimentos.criadoEm}, 'epoch'::timestamptz)`;
 
 export const atendimentoService = {
+    // Lista TODOS os atendimentos (a IA e o cliente), do mais ativo pro menos,
+    // com o que um painel precisa numa linha: cliente, canal, etapa do funil,
+    // nota da IA, se teve venda e a última mensagem. Paginada por cursor.
+    //
+    // options: { limit, canal, etapa, comVenda (bool), desde (Date, inclusivo),
+    //            ate (Date, exclusivo), cursor ({ t, id } — ver cursor.util.js) }
+    // Devolve { itens, proximoCursor }.
+    async listarTodos(options = {}) {
+        const limit = Math.min(Math.max(Number(options.limit) || LISTA_LIMITE_PADRAO, 1), LISTA_LIMITE_MAXIMO);
+
+        const condicoes = [];
+        if (options.canal) condicoes.push(eq(atendimentos.canal, options.canal));
+        if (options.etapa) condicoes.push(eq(atendimentos.statusFunil, options.etapa));
+        if (options.desde) condicoes.push(gte(atividadeEm, options.desde));
+        if (options.ate) condicoes.push(lt(atividadeEm, options.ate));
+        if (options.comVenda !== undefined) {
+            const temVenda = db
+                .select({ um: sql`1` })
+                .from(vendas)
+                .where(eq(vendas.atendimentoId, atendimentos.id));
+            condicoes.push(options.comVenda ? exists(temVenda) : notExists(temVenda));
+        }
+        if (options.cursor) {
+            condicoes.push(
+                or(
+                    sql`${atividadeEm} < ${options.cursor.t}::timestamptz`,
+                    and(
+                        sql`${atividadeEm} = ${options.cursor.t}::timestamptz`,
+                        sql`${atendimentos.id} < ${options.cursor.id}`
+                    )
+                )
+            );
+        }
+
+        const linhasComUma = await db
+            .select({
+                atendimento: atendimentos,
+                cliente: clientes,
+                cursorTs: sql`${atividadeEm}::text`.as('cursor_ts'),
+            })
+            .from(atendimentos)
+            .leftJoin(clientes, eq(atendimentos.clienteId, clientes.id))
+            .where(condicoes.length ? and(...condicoes) : undefined)
+            .orderBy(desc(atividadeEm), desc(atendimentos.id))
+            .limit(limit + 1); // uma a mais só pra saber se existe próxima página
+
+        const temProxima = linhasComUma.length > limit;
+        const linhas = temProxima ? linhasComUma.slice(0, limit) : linhasComUma;
+        if (linhas.length === 0) return { itens: [], proximoCursor: null };
+
+        const ultima = linhas[linhas.length - 1];
+        const proximoCursor = temProxima ? codificarCursor(ultima.cursorTs, ultima.atendimento.id) : null;
+
+        // Enriquecimento só da página: última mensagem, total de mensagens e vendas.
+        const ids = linhas.map((l) => l.atendimento.id);
+        const [ultimas, totais, vendasPorAtendimento] = await Promise.all([
+            db
+                .selectDistinctOn([mensagens.atendimentoId], {
+                    atendimentoId: mensagens.atendimentoId,
+                    remetente: mensagens.remetente,
+                    conteudo: mensagens.conteudo,
+                    formato: mensagens.formato,
+                    enviadoEm: mensagens.enviadoEm,
+                })
+                .from(mensagens)
+                .where(inArray(mensagens.atendimentoId, ids))
+                .orderBy(mensagens.atendimentoId, desc(mensagens.enviadoEm)),
+            db
+                .select({ atendimentoId: mensagens.atendimentoId, total: count() })
+                .from(mensagens)
+                .where(inArray(mensagens.atendimentoId, ids))
+                .groupBy(mensagens.atendimentoId),
+            db
+                .select({ atendimentoId: vendas.atendimentoId, quantidade: count(), total: sum(vendas.valorTotal) })
+                .from(vendas)
+                .where(inArray(vendas.atendimentoId, ids))
+                .groupBy(vendas.atendimentoId),
+        ]);
+        const ultimaPorAtendimento = new Map(ultimas.map((m) => [m.atendimentoId, m]));
+        const totalPorAtendimento = new Map(totais.map((t) => [t.atendimentoId, t.total]));
+        const vendaPorAtendimento = new Map(vendasPorAtendimento.map((v) => [v.atendimentoId, v]));
+
+        const itens = linhas.map(({ atendimento: a, cliente }) => {
+            const msg = ultimaPorAtendimento.get(a.id);
+            const venda = vendaPorAtendimento.get(a.id);
+            const conteudo = msg?.conteudo ?? '';
+            return {
+                id: a.id,
+                cliente: cliente ? { id: cliente.id, nome: cliente.nome, idFace: cliente.idFace } : null,
+                canal: a.canal,
+                origem: a.origem,
+                statusFunil: a.statusFunil,
+                qualidadeIa: a.qualidadeIa,
+                categoriaFeedback: a.categoriaFeedback,
+                precisaAtencaoHumana: a.precisaAtencaoHumana,
+                criadoEm: a.criadoEm,
+                atualizadoEm: a.atualizadoEm,
+                totalMensagens: totalPorAtendimento.get(a.id) ?? 0,
+                ultimaMensagem: msg
+                    ? {
+                          remetente: msg.remetente,
+                          formato: msg.formato,
+                          conteudo:
+                              conteudo.length > PREVIA_MAX_CARACTERES
+                                  ? `${conteudo.slice(0, PREVIA_MAX_CARACTERES)}…`
+                                  : conteudo,
+                          enviadoEm: msg.enviadoEm,
+                      }
+                    : null,
+                venda: venda ? { quantidade: venda.quantidade, total: Number(venda.total) || 0 } : null,
+            };
+        });
+
+        return { itens, proximoCursor };
+    },
+
     // Busca um atendimento pelo id, já com o nome/id_face do cliente — usado
     // pra dar contexto (quem é, qual canal) junto com as mensagens.
     async buscarComCliente(atendimentoId) {

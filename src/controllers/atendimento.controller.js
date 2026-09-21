@@ -1,13 +1,50 @@
 import { z } from 'zod';
 import { atendimentoService } from '../services/atendimento.service.js';
 import { emitAlertaAtendimento } from '../sockets/realtime.js';
+import { decodificarCursor } from '../utils/cursor.util.js';
 
 const sinalizarSchema = z.object({
     id_face: z.string().min(1),
     motivo: z.string().min(1).max(500),
 });
 
+// `desde` é inclusivo e `ate` é exclusivo, sobre a última atividade do atendimento.
+const listarSchema = z.object({
+    canal: z.string().min(1).max(60).optional(),
+    etapa: z.string().min(1).max(60).optional(),
+    com_venda: z.enum(['true', 'false']).optional(),
+    desde: z.coerce.date().optional(),
+    ate: z.coerce.date().optional(),
+    cursor: z.string().max(300).optional(),
+    limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+
 export const atendimentoController = {
+    // Painel: todos os atendimentos com o resumo de cada um. Restrita ao painel
+    // admin (ver requirePainelAdmin em atendimento.routes.js) porque traz nome
+    // e identificador do cliente. Paginada: `proximoCursor` vem preenchido
+    // enquanto houver mais páginas.
+    async listar(req, res) {
+        const parsed = listarSchema.safeParse(req.query);
+        if (!parsed.success) {
+            return res.status(400).json({ success: false, error: 'Parâmetros inválidos', detalhes: parsed.error.flatten() });
+        }
+        const { cursor: cursorTexto, com_venda, ...filtros } = parsed.data;
+
+        let cursor;
+        if (cursorTexto) {
+            cursor = decodificarCursor(cursorTexto);
+            if (!cursor) return res.status(400).json({ success: false, error: 'Cursor inválido' });
+        }
+
+        const { itens, proximoCursor } = await atendimentoService.listarTodos({
+            ...filtros,
+            comVenda: com_venda === undefined ? undefined : com_venda === 'true',
+            cursor,
+        });
+        res.json({ success: true, data: itens, proximoCursor });
+    },
+
     // Chamada pelo n8n (segredo compartilhado, ver n8n.middleware.js) quando o
     // Agente de IA detecta que o cliente precisa de um humano.
     async sinalizar(req, res) {

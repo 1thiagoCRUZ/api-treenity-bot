@@ -64,6 +64,12 @@ O problema que isso cria: o funcionário já fez login **no outro sistema** (lá
      papel "funcionario" (nunca "admin" — promoção continua sendo manual,
      feita dentro deste sistema, pra ninguém virar admin por engano ou bug
      do outro lado)
+   - se o corpo trouxer `painel_admin: true` (o sistema de origem afirmando que
+     a pessoa é admin LÁ), o accessToken ganha a claim `painelAdmin`, que abre
+     só a leitura de vendas e da lista de atendimentos — o papel continua
+     "funcionario". Sem o campo (ou `false`), sem a claim. A claim vive só no
+     accessToken de 15 min: some numa renovação por refresh e precisa ser
+     reafirmada por um novo SSO
    - se o usuário já existe e o `nome` recebido é diferente do gravado, atualiza
      o nome (quem renomeia o perfil no deskcomm aparece com o nome novo na lista
      do chat). Um `nome` vazio ou igual ao e-mail — o que o outro lado manda
@@ -93,6 +99,16 @@ O `accessToken` dura só 15 minutos (igual o de um login normal). Como isso é u
 - A comparação do segredo é em tempo constante (`crypto.timingSafeEqual`), pra não vazar informação por diferença de tempo de resposta.
 - Contas criadas via SSO entram sempre como `funcionario`; virar `admin` é uma ação separada, feita por um admin já existente via `POST /api/auth/usuarios` — o SSO nunca decide isso sozinho.
 - Configure `SSO_SHARED_SECRET` no `.env` (veja `.env.example`) e combine o mesmo valor do lado do deskcomm.
+
+## Painel admin — lista de atendimentos
+
+- `GET /api/atendimentos` → todos os atendimentos (cliente ↔ IA), do mais ativo pro menos, com o resumo de cada um numa linha. Restrito ao **painel admin** (claim `painelAdmin` do SSO, ou admin deste sistema; senão `403`).
+  - **Filtros (query):** `canal`, `etapa` (etapa do funil, ex: `Proposta`, `Fechada`), `com_venda` (`true`/`false`), `desde` (inclusivo) / `ate` (exclusivo) sobre a última atividade, `limit` (padrão 30, máx. 100) e `cursor` (o `proximoCursor` da resposta anterior).
+  - **Resposta:** `{ success, data: [...], proximoCursor }`, com `proximoCursor: null` na última página. Cada item:
+    `{ id, cliente: { id, nome, idFace }, canal, origem, statusFunil, qualidadeIa, categoriaFeedback, precisaAtencaoHumana, criadoEm, atualizadoEm, totalMensagens, ultimaMensagem: { remetente, formato, conteudo (prévia de 140 caracteres), enviadoEm } | null, venda: { quantidade, total } | null }`.
+  - A transcrição completa de um atendimento continua em `GET /api/atendimentos/:id/mensagens`.
+- O painel admin também inclui `GET /api/dashboard/vendas` (ver a seção do dashboard).
+- **Paginação por cursor:** o cursor é opaco (não monte à mão). Ele guarda a última atividade com precisão de microssegundo, então linhas gravadas no mesmo milissegundo (o n8n grava várias por segundo) não são puladas nem repetidas.
 
 ## Chat interno — conversas
 
@@ -245,18 +261,26 @@ Mesma ação acima, mas pensada para ser chamada por um agendador externo (ex: o
 Retorna a lista detalhada das vendas com informações enriquecidas de seus respectivos atendimentos (canais, avaliações, métricas e insights de IA) e clientes (nome, CEP, resumo de perfil e redes sociais).
 
 - **Rota**: `GET /api/dashboard/vendas`
+- **Acesso**: restrito ao **painel admin** — token com a claim `painelAdmin` (emitida pelo `POST /api/auth/sso` quando o sistema de origem manda `painel_admin: true`) ou usuário admin deste sistema. Sem isso: `403`. Traz nome, CEP e itens do cliente, por isso não fica aberto a qualquer autenticado.
 - **Parâmetros de Consulta Opcionais (Query Params)**:
-  - `limit`: Quantidade de vendas retornadas (padrão: `50`)
+  - `limit`: Quantidade de vendas por página (padrão: `50`, máximo: `200`)
+  - `cursor`: Cursor da próxima página (o `proximo_cursor` da resposta anterior)
   - `status`: Filtrar pelo status da venda (ex: `Aguardando Pagamento`, `Fechada`)
   - `canal`: Filtrar por canal de atendimento (ex: `Facebook`, `WhatsApp`)
+  - `desde` / `ate`: Período pela data da venda (`desde` inclusivo, `ate` exclusivo; ex: `desde=2026-09-01&ate=2026-10-01`)
+- **O `resumo` cobre todas as vendas que casam com os filtros**, não só a página — os totais não mudam ao paginar. `proximo_cursor` é `null` na última página.
 - **Resposta de Sucesso (200 OK)**:
 
 ```json
 {
   "success": true,
   "count": 1,
+  "proximo_cursor": null,
   "resumo": {
+    "quantidade": 1,
     "faturamento_total": 30.00,
+    "frete_total": 15.00,
+    "valor_produtos_total": 15.00,
     "ticket_medio": 30.00
   },
   "data": [

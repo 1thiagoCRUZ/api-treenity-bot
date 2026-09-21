@@ -30,6 +30,10 @@ const criarUsuarioSchema = z.object({
 const ssoSchema = z.object({
     email: z.string().email(),
     nome: z.string().min(2),
+    // Opcional. O sistema de origem afirma que esta pessoa é admin LÁ; o token
+    // ganha só a claim `painelAdmin` (leitura de vendas/atendimentos), nunca o
+    // papel 'admin' deste sistema — ver requirePainelAdmin.
+    painel_admin: z.boolean().optional(),
 });
 
 export const authController = {
@@ -108,12 +112,13 @@ export const authController = {
         if (!parsed.success) {
             return res.status(400).json({ success: false, error: 'email e nome são obrigatórios' });
         }
-        const { email, nome } = parsed.data;
+        const { email, nome, painel_admin } = parsed.data;
 
         const usuario = await authService.encontrarOuCriarPorEmailSso(email, nome);
         const { accessToken, refreshToken, refreshExpiraEm } = await authService.emitirTokens(
             usuario,
-            req.headers['user-agent']
+            req.headers['user-agent'],
+            painel_admin === true ? { painelAdmin: true } : {}
         );
 
         res.json({

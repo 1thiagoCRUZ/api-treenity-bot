@@ -1,6 +1,7 @@
-import { and, count, desc, eq, sum } from 'drizzle-orm';
+import { and, count, desc, eq, gte, lt, or, sql, sum } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { clientes, atendimentos, vendas, dashboardMetricsDiarias } from '../db/schema.js';
+import { codificarCursor } from '../utils/cursor.util.js';
 
 async function countTotalCustomers() {
     const [{ total }] = await db.select({ total: count() }).from(clientes);
@@ -75,25 +76,81 @@ export async function getMetrics() {
     }));
 }
 
+const VENDAS_LIMITE_PADRAO = 50;
+const VENDAS_LIMITE_MAXIMO = 200;
+const arredondar = (valor) => Number((Number(valor) || 0).toFixed(2));
+
+// Lista paginada de vendas (mais recentes primeiro) + resumo do CONJUNTO filtrado.
+//
+// options: { limit, status, canal, desde (Date, inclusivo), ate (Date, exclusivo),
+//            cursor ({ t, id } já decodificado — ver cursor.util.js) }
+// Devolve { itens, proximoCursor, resumo }. O resumo cobre TODAS as vendas que
+// casam com os filtros (não só a página), pra os totais de um painel não mudarem
+// conforme a paginação.
 export async function getSalesDetails(options = {}) {
-    const limit = options.limit ? Number(options.limit) : 50;
-    const status = options.status;
-    const canal = options.canal;
+    const limit = Math.min(Math.max(Number(options.limit) || VENDAS_LIMITE_PADRAO, 1), VENDAS_LIMITE_MAXIMO);
 
-    const condicoes = [];
-    if (status) condicoes.push(eq(vendas.statusVenda, status));
-    if (canal) condicoes.push(eq(atendimentos.canal, canal)); // filtrado no banco, antes do limit
+    // Filtros que definem o conjunto — valem pra lista e pro resumo.
+    const filtros = [];
+    if (options.status) filtros.push(eq(vendas.statusVenda, options.status));
+    if (options.canal) filtros.push(eq(atendimentos.canal, options.canal)); // filtrado no banco, antes do limit
+    if (options.desde) filtros.push(gte(vendas.criadoEm, options.desde));
+    if (options.ate) filtros.push(lt(vendas.criadoEm, options.ate));
 
-    const linhas = await db
-        .select({ venda: vendas, atendimento: atendimentos, cliente: clientes })
+    // O cursor só restringe a página, nunca o resumo.
+    const condicoesDaPagina = [...filtros];
+    if (options.cursor) {
+        condicoesDaPagina.push(
+            or(
+                sql`${vendas.criadoEm} < ${options.cursor.t}::timestamptz`,
+                and(
+                    sql`${vendas.criadoEm} = ${options.cursor.t}::timestamptz`,
+                    sql`${vendas.id} < ${options.cursor.id}`
+                )
+            )
+        );
+    }
+
+    const linhasComUma = await db
+        .select({
+            venda: vendas,
+            atendimento: atendimentos,
+            cliente: clientes,
+            cursorTs: sql`${vendas.criadoEm}::text`.as('cursor_ts'),
+        })
         .from(vendas)
         .leftJoin(atendimentos, eq(vendas.atendimentoId, atendimentos.id))
         .leftJoin(clientes, eq(atendimentos.clienteId, clientes.id))
-        .where(condicoes.length ? and(...condicoes) : undefined)
-        .orderBy(desc(vendas.criadoEm))
-        .limit(limit);
+        .where(condicoesDaPagina.length ? and(...condicoesDaPagina) : undefined)
+        .orderBy(desc(vendas.criadoEm), desc(vendas.id))
+        .limit(limit + 1); // uma a mais só pra saber se existe próxima página
 
-    return linhas.map(({ venda, atendimento, cliente }) => {
+    const temProxima = linhasComUma.length > limit;
+    const linhas = temProxima ? linhasComUma.slice(0, limit) : linhasComUma;
+    const ultima = linhas[linhas.length - 1];
+    const proximoCursor = temProxima ? codificarCursor(ultima.cursorTs, ultima.venda.id) : null;
+
+    const [totais] = await db
+        .select({
+            quantidade: count(),
+            faturamento: sum(vendas.valorTotal),
+            frete: sum(vendas.valorFrete),
+            produtos: sum(vendas.valorProdutos),
+        })
+        .from(vendas)
+        .leftJoin(atendimentos, eq(vendas.atendimentoId, atendimentos.id))
+        .where(filtros.length ? and(...filtros) : undefined);
+
+    const quantidade = totais.quantidade || 0;
+    const resumo = {
+        quantidade,
+        faturamento_total: arredondar(totais.faturamento),
+        frete_total: arredondar(totais.frete),
+        valor_produtos_total: arredondar(totais.produtos),
+        ticket_medio: quantidade > 0 ? arredondar(Number(totais.faturamento) / quantidade) : 0,
+    };
+
+    const itens = linhas.map(({ venda, atendimento, cliente }) => {
         const nomeCliente = cliente?.nome || 'Desconhecido';
 
         return {
@@ -128,4 +185,6 @@ export async function getSalesDetails(options = {}) {
             },
         };
     });
+
+    return { itens, proximoCursor, resumo };
 }

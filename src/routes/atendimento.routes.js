@@ -1,10 +1,14 @@
 import { Router } from 'express';
 import { atendimentoController } from '../controllers/atendimento.controller.js';
 import { asyncHandler } from '../middlewares/asyncHandler.js';
-import { requireAuth } from '../middlewares/auth.middleware.js';
+import { requireAuth, requirePainelAdmin } from '../middlewares/auth.middleware.js';
 import { requireN8nSecret } from '../middlewares/n8n.middleware.js';
 
 const router = Router();
+
+// Painel admin: todos os atendimentos, com cliente, etapa, nota da IA, venda e
+// última mensagem (traz dados de cliente — só claim `painelAdmin` ou admin do bot).
+router.get('/', requireAuth, requirePainelAdmin, asyncHandler(atendimentoController.listar));
 
 // Chamada pelo n8n (server-to-server), não por usuário logado.
 router.post('/sinalizar', requireN8nSecret, asyncHandler(atendimentoController.sinalizar));

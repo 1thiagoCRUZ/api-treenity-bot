@@ -1,4 +1,16 @@
+import { z } from 'zod';
 import { getMetrics, consolidateMetrics, getSalesDetails } from '../services/dashboard.service.js';
+import { decodificarCursor } from '../utils/cursor.util.js';
+
+// `desde` é inclusivo e `ate` é exclusivo (ex: pra um dia inteiro, ate = dia seguinte).
+const vendasQuerySchema = z.object({
+    limit: z.coerce.number().int().min(1).max(200).optional(),
+    status: z.string().min(1).max(60).optional(),
+    canal: z.string().min(1).max(60).optional(),
+    desde: z.coerce.date().optional(),
+    ate: z.coerce.date().optional(),
+    cursor: z.string().max(300).optional(),
+});
 
 export const dashboardController = {
 
@@ -21,33 +33,35 @@ export const dashboardController = {
         }
     },
 
+    // Lista de vendas + resumo do conjunto filtrado. Restrita ao painel admin
+    // (ver requirePainelAdmin em dashboard.routes.js). Paginação por cursor:
+    // `proximo_cursor` vem preenchido enquanto houver mais páginas.
     async getSalesDetails(req, res) {
+        const parsed = vendasQuerySchema.safeParse(req.query);
+        if (!parsed.success) {
+            return res.status(400).json({ success: false, error: 'Parâmetros inválidos', detalhes: parsed.error.flatten() });
+        }
+        const { cursor: cursorTexto, ...filtros } = parsed.data;
+
+        let cursor;
+        if (cursorTexto) {
+            cursor = decodificarCursor(cursorTexto);
+            if (!cursor) return res.status(400).json({ success: false, error: 'Cursor inválido' });
+        }
+
         try {
-            const limit = req.query.limit ? Number(req.query.limit) : 50;
-            const status = req.query.status;
-            const canal = req.query.canal;
-
-            const vendas = await getSalesDetails({ limit, status, canal });
-
-            const totalFaturamento = vendas.reduce((acc, v) => acc + (Number(v.total) || 0), 0);
-            const ticketMedio = vendas.length > 0 ? Number((totalFaturamento / vendas.length).toFixed(2)) : 0;
+            const { itens, proximoCursor, resumo } = await getSalesDetails({ ...filtros, cursor });
 
             res.status(200).json({
                 success: true,
-                count: vendas.length,
-                resumo: {
-                    faturamento_total: Number(totalFaturamento.toFixed(2)),
-                    ticket_medio: ticketMedio
-                },
-                data: vendas
+                count: itens.length,
+                resumo,
+                proximo_cursor: proximoCursor,
+                data: itens,
             });
         } catch (error) {
             console.error('Error in getSalesDetails:', error);
-            res.status(500).json({
-                success: false,
-                error: 'Erro ao buscar detalhes das vendas',
-                message: error.message
-            });
+            res.status(500).json({ success: false, error: 'Erro ao buscar detalhes das vendas' });
         }
     },
 
