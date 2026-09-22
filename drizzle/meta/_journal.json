@@ -50,6 +50,13 @@
       "when": 1790023930882,
       "tag": "0006_painel_tempo_real",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790034545404,
+      "tag": "0007_pagamento_de_venda",
+      "breakpoints": true
     }
   ]
 }

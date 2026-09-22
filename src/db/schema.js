@@ -165,6 +165,10 @@ export const vendas = pgTable(
         transportadora: varchar('transportadora'),
         statusVenda: varchar('status_venda').default('Aguardando Pagamento'),
         criadoEm: timestamp('criado_em', { withTimezone: true }).defaultNow(),
+        // Preenchidos quando um admin confere o pagamento no painel (a API não
+        // valida PIX sozinha). Ver POST /api/vendas/:id/pagamento.
+        pagoEm: timestamp('pago_em', { withTimezone: true }),
+        pagamentoConfirmadoPor: varchar('pagamento_confirmado_por'),
     },
     (table) => [
         // "Tem venda?" e vendas por atendimento (lista de atendimentos do painel).

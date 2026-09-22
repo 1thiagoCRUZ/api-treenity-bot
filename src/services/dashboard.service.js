@@ -165,6 +165,8 @@ export async function getSalesDetails(options = {}) {
             status: venda.statusVenda || 'Desconhecido',
             transportadora: venda.transportadora || null,
             valor_produtos: Number(venda.valorProdutos) || 0,
+            pago_em: venda.pagoEm || null,
+            pagamento_confirmado_por: venda.pagamentoConfirmadoPor || null,
             cliente_detalhes: {
                 id: cliente?.id || null,
                 nome: nomeCliente,

@@ -268,6 +268,19 @@ Mesma ação acima, mas pensada para ser chamada por um agendador externo (ex: o
 - **Rota**: `POST /api/dashboard/atualizar-agendado`
 - **Autenticação**: header `X-Cron-Secret` com o valor de `CRON_SHARED_SECRET` (em vez de Bearer token). Sem essa variável configurada no ambiente, a rota responde `501`.
 
+### Confirmar pagamento de uma venda
+
+Quando o bot fecha uma venda por PIX ele só envia a chave — **a API não valida o pagamento**. Um admin confere no banco e marca a venda como paga; o deskcomm faz isso quando o admin conclui a tarefa "Conferir pagamento PIX" (criada automaticamente para cada venda nova).
+
+- **Rota**: `POST /api/vendas/:id/pagamento` (`:id` é o `id_venda` de `GET /api/dashboard/vendas`)
+- **Autenticação**: header `X-SSO-Secret` (o mesmo segredo do SSO) — chamada **server-to-server**, nunca do navegador. O deskcomm só a faz depois de confirmar que quem concluiu a tarefa é admin.
+- **Body**: `{ "pago": true, "confirmado_por": "admin@exemplo.com" }` marca como `Paga` (`confirmado_por` é obrigatório); `{ "pago": false }` desfaz.
+- **Idempotente**: repetir a chamada não altera nada (`"alterou": false`). Desfazer só age se a venda ainda está `Paga` — se o n8n já a levou para outro status, ele não é sobrescrito.
+- **Efeito**: `status_venda` vira `Paga` e `pago_em` / `pagamento_confirmado_por` são preenchidos (aparecem em `GET /api/dashboard/vendas`). O trigger de `vendas` avisa o painel ao vivo.
+- **Erros**: `400` (id ou body inválido), `401` (segredo), `404` (venda não existe), `501` (SSO não configurado).
+
+**Listar vendas aguardando pagamento** (para o deskcomm criar as tarefas): `GET /api/vendas/aguardando-pagamento?desde=<ISO>&limit=&cursor=` — também com `X-SSO-Secret`; devolve `{ success, count, proximo_cursor, data }` com o mesmo formato de `GET /api/dashboard/vendas`, só das vendas criadas a partir de `desde` (obrigatório).
+
 ### Buscar Detalhes das Vendas (com Atendimentos e Clientes)
 
 Retorna a lista detalhada das vendas com informações enriquecidas de seus respectivos atendimentos (canais, avaliações, métricas e insights de IA) e clientes (nome, CEP, resumo de perfil e redes sociais).

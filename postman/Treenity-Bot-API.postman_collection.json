@@ -316,6 +316,52 @@
       ]
     },
     {
+      "name": "Vendas",
+      "item": [
+        {
+          "name": "Confirmar pagamento de venda (deskcomm)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-SSO-Secret",
+                "value": "{{ssoSecret}}"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pago\": true,\n  \"confirmado_por\": \"admin@exemplo.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/vendas/COLOQUE_AQUI_O_ID_DA_VENDA/pagamento",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "vendas",
+                "COLOQUE_AQUI_O_ID_DA_VENDA",
+                "pagamento"
+              ]
+            },
+            "description": "Chamada server-to-server do deskcomm quando um admin conclui a tarefa 'Conferir pagamento PIX'. NÃO usa Bearer — usa X-SSO-Secret ({{ssoSecret}}).\n\nBody:\n- pago (boolean, obrigatório) — true marca a venda como 'Paga'; false desfaz (só se ela ainda estiver 'Paga')\n- confirmado_por (string) — obrigatório quando pago=true; quem conferiu\n\nIdempotente: repetir não altera nada ('alterou': false). 404 se a venda não existe.\n\nO id da venda é o id_venda de GET /api/dashboard/vendas."
+          }
+        }
+      ]
+    },
+    {
       "name": "Atendimentos",
       "item": [
         {
