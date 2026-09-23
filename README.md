@@ -176,6 +176,45 @@ O código está dividido por responsabilidades para facilitar a manutenção:
 
 Tabelas gerenciadas pelo Drizzle (`src/db/schema.js`, migrations em `drizzle/`): `usuarios`, `refresh_tokens`, `chat_conversas`, `chat_mensagens`, além de `clientes`, `atendimentos`, `vendas`, `mensagens` e `dashboard_metrics_diarias`, que já existiam no banco e foram trazidas para o schema.
 
+## Estrutura do Banco de Dados (clientes, atendimentos, vendas)
+
+As três tabelas que o n8n escreve direto (sem passar por esta API) e que sustentam o painel admin:
+
+```
+clientes
+  └─< atendimentos   (1 cliente → N atendimentos, FK cliente_id)
+         ├─< mensagens   (1 atendimento → N mensagens, FK atendimento_id)
+         └─< vendas      (1 atendimento → N vendas, FK atendimento_id)
+```
+
+- **`atendimentos` é a CONVERSA.** `status_funil` (`Iniciou` → `Em Negociacao` → `Proposta` → `Fechada`) é o estágio do bate-papo, avançado pela IA. Também carrega qualidade/feedback da IA (`qualidade_ia`, `categoria_feedback`, `insights_ia`) e a sinalização de atendimento sensível (`precisa_atencao_humana`, `motivo_atencao`, `atencao_sinalizada_em`).
+- **`vendas` é o PEDIDO.** Só nasce quando o n8n roda o subfluxo de fechar pedido — tem itens (texto livre), valores, `status_venda` (`Aguardando Pagamento` → `Paga`, ver a seção de pagamento acima).
+- **As duas tabelas têm ciclos de vida INDEPENDENTES.** Um atendimento pode chegar em `Fechada` e nunca ganhar uma venda (o negócio esfriou depois de combinado); e pode ter `forma_pagamento` decidido na conversa **antes** de existir qualquer linha em `vendas`. Não existe garantia de que `status_funil = 'Fechada'` implica ter uma venda, nem o contrário.
+
+### Pontos levantados em revisão (23/09/2026) — decisão: manter como está por enquanto
+
+Discutido com o dono do produto; nenhum destes é bug, mas envolvem os fluxos do n8n e por isso ficam registrados aqui pra revisar quando fizer sentido, em vez de mexer sem alinhar:
+
+1. **`vendas.itens_pedido` é texto livre** (ex: `"2x Smartphone Galáxia X10 Pro"`), sem tabela de produtos nem linhas de pedido estruturadas. Não dá pra somar unidades vendidas por produto nem conferir `valor_total` contra os itens de forma confiável.
+2. **`status_funil`, `status_venda` e `canal` são `varchar` sem `CHECK`/enum.** Nada no banco impede um valor fora da lista conhecida — o código do painel já precisa de um fallback defensivo pra valor desconhecido (`etapaConhecida()` no sincronizador do funil, no deskcomm).
+3. **`forma_pagamento` existe em `atendimentos` E em `vendas`**, adicionado direto no Postgres por fora de qualquer migration (não está em `src/db/schema.js`). Hoje só o de `atendimentos` é preenchido; o de `vendas` está sempre nulo. Contrato de quem escreve o quê e quando não está documentado do lado do n8n.
+4. **1 atendimento pode ter N vendas**, sem nada nos dados indicando qual é "a" venda ativa — o código atual (painel, automações do deskcomm) trata isso via soma/agregado.
+5. **`conta_id` existe em `clientes` E em `atendimentos`** — podia vir só de `clientes` via join; hoje pode divergir se um lado for atualizado e o outro não.
+6. **`clientes.id_face` carrega a identidade em qualquer canal** (WhatsApp, Instagram, Facebook), mas o nome só sugere Facebook.
+7. **`atendimentos.atualizado_em` precisa ser tocado em toda escrita relevante do n8n** — é a "última atividade" que o painel usa pra ordenar e que a autocura de leads perdidos do deskcomm usa pra decidir "esse atendimento esfriou". Se algum `UPDATE` do n8n mudar `status_funil`/`forma_pagamento` sem tocar essa coluna, a autocura conta atividade errada.
+
+## Limitações conhecidas em produção
+
+### Render free tier "dorme" com inatividade
+
+O serviço (`api-treenity-bot-staging`, plano `free` no `render.yaml`) desliga sozinho depois de **15 minutos sem receber nenhuma requisição**. A próxima requisição que chegar paga o custo de "ligar" a instância de novo — o próprio Render avisa que pode passar de 50 segundos.
+
+- **Onde isso dói de verdade:** um cliente mandando mensagem no WhatsApp/Instagram enquanto o bot está dormindo espera até 50s+ pela resposta da IA (a chamada vem do n8n) — pode parecer que ninguém respondeu, principalmente em horário de menos movimento.
+- Afeta também quem abre o painel do deskcomm depois de um tempo sem uso (primeira ação lenta, depois normal), e a conexão `LISTEN` do tempo real (ver a nota na seção "Painel admin — tempo real" acima — ela reconecta sozinha, mas eventos durante o sono se perdem).
+- **Nada hoje evita isso de propósito:** o único cron que já bate na API (`metrics-cron.yml`) roda de hora em hora — bem mais espaçado que os 15 minutos que o Render exige pra não dormir, então não ajuda a manter acordado.
+- **Opções consideradas:** (a) plano pago do Render (tira o "dormir" de vez, ~US$7/mês na entrada); (b) um ping agendado a cada ~10 min só pra manter acordado (grátis, mas é contornar o limite do plano free); (c) aceitar o risco por enquanto.
+- **Decisão (23/09/2026):** manter no plano free por enquanto — revisar se o volume de mensagens justificar.
+
 ## Como Configurar e Rodar Localmente
 
 ### 1. Clonando e Instalando Dependências
