@@ -3,7 +3,6 @@ import { respostaRapidaService } from '../services/resposta-rapida.service.js';
 import { normalizarGatilhos } from '../utils/normalizar.util.js';
 
 const idSchema = z.coerce.number().int().positive();
-const origemIdSchema = z.string().uuid();
 
 const listarSchema = z.object({
     conta_id: z.string().trim().min(1).max(100).optional(),
@@ -23,6 +22,15 @@ const campos = {
     prioridade: z.number().int().min(0).max(10000),
     conta_id: z.string().trim().min(1).max(100).nullable(),
     midia_chave: z.string().trim().min(1).max(200).nullable(),
+    // O que a equipe digita depois da barra no Inbox. Chega com ou sem a barra;
+    // vazio vira null (a resposta fica sem atalho).
+    atalho: z
+        .string()
+        .trim()
+        .max(41)
+        .transform((valor) => valor.replace(/^\//, '').trim() || null)
+        .pipe(z.string().max(40).nullable())
+        .nullable(),
     ativo: z.boolean(),
 };
 
@@ -33,14 +41,8 @@ const criarSchema = z.object({
     prioridade: campos.prioridade.default(100),
     conta_id: campos.conta_id.optional(),
     midia_chave: campos.midia_chave.optional(),
+    atalho: campos.atalho.optional(),
     ativo: campos.ativo.default(true),
-});
-
-// Espelho: o deskcomm manda a resposta INTEIRA a cada salvamento. Campo
-// ausente volta ao padrão, senão um valor apagado lá continuaria valendo aqui.
-const espelharSchema = criarSchema.extend({
-    conta_id: campos.conta_id.default(null),
-    midia_chave: campos.midia_chave.default(null),
 });
 
 // Campo ausente não é alterado — nunca zerar o que não veio.
@@ -61,6 +63,7 @@ function paraColunas(dados) {
         prioridade: dados.prioridade,
         contaId: dados.conta_id,
         midiaChave: dados.midia_chave,
+        atalho: dados.atalho,
         ativo: dados.ativo,
     };
     return Object.fromEntries(Object.entries(colunas).filter(([, valor]) => valor !== undefined));
@@ -72,13 +75,13 @@ function formatar(linha) {
         conta_id: linha.contaId,
         titulo: linha.titulo,
         corpo: linha.corpo,
+        atalho: linha.atalho,
         gatilhos: linha.gatilhos,
         contexto: linha.contexto,
         midia_chave: linha.midiaChave,
         prioridade: linha.prioridade,
         max_chars_msg: linha.maxCharsMsg,
         ativo: linha.ativo,
-        origem_id: linha.origemId,
         criado_em: linha.criadoEm,
         atualizado_em: linha.atualizadoEm,
     };
@@ -140,31 +143,6 @@ export const respostaRapidaController = {
         const atualizada = await respostaRapidaService.atualizar(id.data, valores);
         if (!atualizada) return res.status(404).json({ success: false, error: 'Resposta rápida não encontrada' });
         res.json({ success: true, data: formatar(atualizada) });
-    },
-
-    async espelhar(req, res) {
-        const origemId = origemIdSchema.safeParse(req.params.origemId);
-        if (!origemId.success) return res.status(400).json({ success: false, error: 'origem_id inválido' });
-
-        const parsed = espelharSchema.safeParse(req.body);
-        if (!parsed.success) return erroValidacao(res, parsed);
-
-        const valores = paraColunas(parsed.data);
-        if (valores.ativo && valores.gatilhos.length === 0) {
-            return res.status(422).json({ success: false, error: ERRO_SEM_GATILHO });
-        }
-
-        const linha = await respostaRapidaService.espelhar(origemId.data, valores);
-        res.json({ success: true, data: formatar(linha) });
-    },
-
-    async removerEspelho(req, res) {
-        const origemId = origemIdSchema.safeParse(req.params.origemId);
-        if (!origemId.success) return res.status(400).json({ success: false, error: 'origem_id inválido' });
-
-        const existia = await respostaRapidaService.removerEspelho(origemId.data);
-        if (!existia) return res.status(404).json({ success: false, error: 'Resposta rápida não encontrada' });
-        res.status(204).end();
     },
 
     async remover(req, res) {
