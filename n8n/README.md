@@ -167,6 +167,106 @@ Assim que o atendimento sinalizado estiver `'Fechada'`, a próxima mensagem daqu
 
 ---
 
+## Mídia (imagem/vídeo) não aparece na conversa espelhada (deskcomm)
+
+> Levantado em 26/09/2026. Ao contrário da seção anterior, **esta mudança ainda
+> não existe em lugar nenhum** — nem nesta API, nem (até onde os exports deste
+> diretório mostram) no n8n. É só descrição do problema e do que precisa ser
+> feito.
+
+### O problema
+
+A tela de transcrição do deskcomm (`/app/integrations/treenity-bot/[id]`) lê
+`GET /api/atendimentos/:id/mensagens`, que devolve as linhas de `mensagens`
+tal como estão no banco — incluindo a coluna `formato`. O front já sabe
+diferenciar por `formato`; o que falta é o **dado** chegar lá.
+
+Hoje, quando o Agente de IA manda um vídeo de identificação de praga pro
+cliente (catálogo em `midias`, log em `midias_enviadas`), **nenhuma linha é
+gravada em `mensagens`** pra esse envio. Confirmado direto no banco: existem
+`0` mensagens com `formato = 'video'` ou `'imagem'` — só `'texto'`, `null` e
+`'audio'`. A conversa mostrada no deskcomm tem literalmente um buraco onde o
+vídeo foi enviado, porque o dado nunca existiu ali — não é a tela escondendo
+algo que está no banco.
+
+`midias_enviadas` também não ajuda a reconstruir isso depois: só guarda
+`destinatario` (telefone) e `chave` (qual mídia), sem `atendimento_id` nem
+`mensagem_id` — não dá pra juntar com segurança a um ponto exato da conversa
+depois do fato.
+
+Sobre os exports deste diretório: eles estão **desatualizados** em relação ao
+que roda em produção nesse ponto específico — nenhum dos dois já procurei
+(`[Sub-Fluxo] | Agente de IA.json`, `[Webhook] | Facebook.json`) menciona
+`midias` ou seta a coluna `formato` nos `INSERT INTO mensagens` que eles têm.
+Ou seja, o node/lógica que manda vídeo e grava em `midias_enviadas` foi
+adicionado direto na instância do n8n em algum momento depois do último export
+salvo aqui. Por isso o que segue é descritivo (o que precisa existir), não um
+diff de um node específico — quem for aplicar precisa achar, na instância
+real, o ponto onde a mídia é enviada (provavelmente logo antes ou depois do
+`INSERT INTO midias_enviadas`).
+
+### O que precisa mudar no n8n
+
+**1. Junto do envio de vídeo/imagem** (onde hoje só grava em
+`midias_enviadas`), adicionar um `INSERT INTO mensagens` igual ao que já
+existe pra texto/áudio, só que com `formato` explícito e o **link da mídia**
+no lugar do texto em `conteudo`:
+
+```sql
+INSERT INTO mensagens (atendimento_id, remetente, conteudo, formato)
+SELECT id, 'ia', $2, $3
+FROM atendimentos
+WHERE cliente_id = (SELECT id FROM clientes WHERE id_face = $1 LIMIT 1)
+  AND status_funil != 'Fechada'
+LIMIT 1;
+```
+Com `$2` = `midias.url` da mídia que acabou de ser enviada (a mesma URL usada
+pra mandar via Graph API) e `$3` = `midias.tipo` (hoje os valores existentes
+lá são `'video'`/`'audio'`; use o mesmo valor de `tipo` como `formato`, pra
+`imagem` ficar `'imagem'` se/quando existir esse tipo no catálogo). **Não
+precisa de migração** — `conteudo` já é `text` livre, aceita uma URL do mesmo
+jeito que aceita uma frase.
+
+Mesmo padrão do INSERT de texto/áudio já existente (mesmo `WHERE`, resolvendo
+o atendimento aberto pelo `id_face` do cliente) — só reaproveitar.
+
+**2. Imagem enviada PELO cliente (sentido inverso)** — ao investigar achei um
+gap relacionado, não perguntado mas que vale registrar: o node que lê o evento
+do Facebook (`[Webhook] | Facebook`, no export local) só verifica
+`attachment.type === 'audio'`; um anexo de imagem do cliente não é tratado
+nem seta `mensagem_cliente` — se o cliente mandar só uma foto (sem legenda
+digitada), a mensagem provavelmente é tratada como vazia. Se isso também
+importa pro caso de uso (cliente manda foto da praga), precisa de um segundo
+`if (attachment.type === 'image')`, salvando a URL da foto em `mensagens`
+(`remetente = 'cliente'`, `formato = 'imagem'`) do mesmo jeito do item 1.
+
+**3. Áudio — sem mudança necessária, mas com uma limitação que vale explicar**
+
+Hoje `formato = 'audio'` já existe e o `conteudo` guarda a **transcrição**
+(texto), não um link pro arquivo de áudio — nem o áudio do cliente (baixado
+temporariamente da Meta só pra passar pelo Gemini) nem o áudio gerado por TTS
+(Azure Speech) pra resposta da IA são salvos em lugar nenhum permanente. Isso
+significa que, mesmo depois dos itens 1 e 2, a transcrição continua sendo tudo
+que o deskcomm pode mostrar pra mensagens de áudio — não tem link pra tocar.
+Pra mudar isso seria preciso um passo a mais no n8n (subir o arquivo de áudio
+pra um storage permanente — Supabase Storage ou o mesmo Azure Blob já usado
+por `midias` — e salvar essa URL em vez de/além da transcrição). Isso é bem
+mais trabalho (upload, custo de storage recorrente) que os itens 1/2, então
+fica como decisão separada, não bloqueia o resto.
+
+### Do lado da API e do deskcomm
+
+- **Esta API não precisa de nenhuma mudança** — `GET
+  /api/atendimentos/:id/mensagens` já faz `SELECT *` em `mensagens`, então
+  `formato` e qualquer `conteudo` (texto ou URL) já vão automaticamente na
+  resposta assim que o n8n passar a gravá-los.
+- **O deskcomm já foi ajustado** pra renderizar `formato = 'imagem'` como
+  `<img>` e `'video'` como `<video>` (só falta o n8n mandar o dado); mensagens
+  de áudio agora aparecem com um rótulo deixando claro que eram uma mensagem
+  de voz transcrita, em vez de parecer texto digitado.
+
+---
+
 ## Modelo de dados tocado (Postgres/Supabase)
 
 | Tabela | Escrita por | Leitura por |
