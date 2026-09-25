@@ -5,6 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,6 +23,7 @@ import { Server } from 'socket.io';
 import configureChatSockets from './sockets/chat.socket.js';
 import { setIo } from './sockets/realtime.js';
 import { iniciarPainelListener } from './realtime/painel-listener.js';
+import { apiLimiter } from './middlewares/rate-limit.middleware.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -55,7 +57,12 @@ configureChatSockets(io);
 setIo(io); // permite que controllers fora do socket (ex: atendimentos) emitam eventos
 const porta = process.env.PORT || 3000;
 
+// CSP desativada de propósito: public/chat.html (demo) carrega o socket.io
+// client via CDN, e o CSP padrão do helmet bloquearia esse <script src>. O
+// resto dos headers de segurança (X-Content-Type-Options, HSTS, etc.) valem.
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ origin: checkOrigin, credentials: true }));
+app.use(apiLimiter);
 app.use(express.json());
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, '../public')));
