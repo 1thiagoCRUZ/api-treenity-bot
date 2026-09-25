@@ -174,7 +174,7 @@ O código está dividido por responsabilidades para facilitar a manutenção:
     └── jwt.util.js             # Assinatura/verificação do access token
 ```
 
-Tabelas gerenciadas pelo Drizzle (`src/db/schema.js`, migrations em `drizzle/`): `usuarios`, `refresh_tokens`, `chat_conversas`, `chat_mensagens`, além de `clientes`, `atendimentos`, `vendas`, `mensagens` e `dashboard_metrics_diarias`, que já existiam no banco e foram trazidas para o schema.
+Tabelas gerenciadas pelo Drizzle (`src/db/schema.js`, migrations em `drizzle/`): `usuarios`, `refresh_tokens`, `chat_conversas`, `chat_mensagens`, além de `clientes`, `atendimentos`, `vendas`, `mensagens`, `respostas_rapidas` e `dashboard_metrics_diarias`, que já existiam no banco e foram trazidas para o schema.
 
 ## Estrutura do Banco de Dados (clientes, atendimentos, vendas)
 
@@ -319,6 +319,23 @@ Quando o bot fecha uma venda por PIX ele só envia a chave — **a API não vali
 - **Erros**: `400` (id ou body inválido), `401` (segredo), `404` (venda não existe), `501` (SSO não configurado).
 
 **Listar vendas aguardando pagamento** (para o deskcomm criar as tarefas): `GET /api/vendas/aguardando-pagamento?desde=<ISO>&limit=&cursor=` — também com `X-SSO-Secret`; devolve `{ success, count, proximo_cursor, data }` com o mesmo formato de `GET /api/dashboard/vendas`, só das vendas criadas a partir de `desde` (obrigatório).
+
+### Respostas rápidas (CRUD)
+
+Texto que a loja escreve e o bot manda **sem chamar o modelo**, quando a mensagem do cliente contém um dos gatilhos. O n8n lê direto de `respostas_rapidas` a cada mensagem; estas rotas existem para o dono editar pela tela do deskcomm, sem SQL. O que for salvo vale já na mensagem seguinte.
+
+- **Autenticação**: header `X-SSO-Secret` — server-to-server, nunca do navegador.
+- `GET /api/respostas-rapidas?conta_id=&ativo=true|false` → `{ success, count, data }`, ordenado por `contexto`, `prioridade`, `id`.
+- `POST /api/respostas-rapidas` → `201`. Body: `{ titulo, corpo, gatilhos: string[], contexto?, max_chars_msg?, prioridade?, conta_id?, midia_chave?, ativo? }`. Padrões: `contexto: "qualquer"`, `max_chars_msg: 60`, `prioridade: 100`, `ativo: true`.
+- `PATCH /api/respostas-rapidas/:id` → body parcial; campo ausente não muda (`null` limpa `conta_id` / `midia_chave`).
+- `DELETE /api/respostas-rapidas/:id` → `204`.
+- **Espelho do deskcomm** — as respostas salvas no deskcomm (`message_templates`) chegam aqui endereçadas pelo id de lá, gravado em `origem_id`:
+  - `PUT /api/respostas-rapidas/origem/:origemId` → cria ou substitui a linha inteira (idempotente; campo ausente volta ao padrão).
+  - `DELETE /api/respostas-rapidas/origem/:origemId` → `204`, ou `404` se não havia espelho.
+  - Linhas com `origem_id` nulo (criadas por SQL ou pelas rotas acima) nunca são tocadas pelo espelho.
+- **Gatilhos são normalizados ao gravar**, igual à função `normalizar_texto()` do banco que o n8n usa (`src/utils/normalizar.util.js`): "Qual o FRETE?!" vira `qual o frete`. Gatilhos com menos de 2 letras e duplicados são descartados.
+- **Regras**: `contexto` só `abertura` (1ª mensagem em 24h) ou `qualquer`; `max_chars_msg` entre 10 e 400 (trava contra o atalho responder uma pergunta longa); resposta ativa sem gatilho é recusada com `422`, porque nunca dispararia.
+- **Erros**: `400` (dados inválidos), `401` (segredo), `404` (não existe), `422` (ativa sem gatilho), `501` (SSO não configurado).
 
 ### Buscar Detalhes das Vendas (com Atendimentos e Clientes)
 
