@@ -15,6 +15,7 @@ import dashboardRoutes from './routes/dashboard.routes.js';
 import chatRoutes from './routes/chat.routes.js';
 import atendimentoRoutes from './routes/atendimento.routes.js';
 import vendaRoutes from './routes/venda.routes.js';
+import respostaRapidaRoutes from './routes/resposta-rapida.routes.js';
 import { errorHandler } from './middlewares/error.middleware.js';
 import http from 'http';
 import { Server } from 'socket.io';
@@ -64,6 +65,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/atendimentos', atendimentoRoutes);
 app.use('/api/vendas', vendaRoutes);
+app.use('/api/respostas-rapidas', respostaRapidaRoutes);
 
 app.use(errorHandler);
 
@@ -90,6 +92,10 @@ server.listen(porta, () => {
     console.log(`   - GET  http://localhost:${porta}/api/atendimentos/sinalizados`);
     console.log(`   - GET  http://localhost:${porta}/api/atendimentos/:id/mensagens`);
     console.log(`   - POST http://localhost:${porta}/api/vendas/:id/pagamento`);
+    console.log(`   - GET  http://localhost:${porta}/api/respostas-rapidas`);
+    console.log(`   - POST http://localhost:${porta}/api/respostas-rapidas`);
+    console.log(`   - PATCH http://localhost:${porta}/api/respostas-rapidas/:id`);
+    console.log(`   - DELETE http://localhost:${porta}/api/respostas-rapidas/:id`);
     console.log(`Sockets enabled at /chat namespace`);
     console.log(`======================================================`);
     startCronJobs();

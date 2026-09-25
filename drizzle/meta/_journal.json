@@ -57,6 +57,13 @@
       "when": 1790034545404,
       "tag": "0007_pagamento_de_venda",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790308538313,
+      "tag": "0008_respostas_rapidas",
+      "breakpoints": true
     }
   ]
 }

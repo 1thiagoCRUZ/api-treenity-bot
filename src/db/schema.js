@@ -3,6 +3,7 @@ import {
     pgTable,
     pgEnum,
     uuid,
+    bigserial,
     text,
     varchar,
     boolean,
@@ -14,6 +15,7 @@ import {
     jsonb,
     index,
     unique,
+    check,
 } from 'drizzle-orm/pg-core';
 
 // Gera UUIDs usando a extensão uuid-ossp já disponível no Supabase
@@ -175,6 +177,38 @@ export const vendas = pgTable(
         index('idx_vendas_atendimento').on(table.atendimentoId),
         // Paginação por cursor da lista de vendas (mais recentes primeiro).
         index('idx_vendas_criado').on(table.criadoEm, table.id),
+    ]
+);
+
+// Texto que a loja escreve e o bot manda SEM chamar o modelo, quando a mensagem
+// do cliente contém um dos gatilhos. O n8n lê direto desta tabela a cada
+// mensagem (colar-no-n8n/11-Buscar-Resposta-Rapida.sql, no repo do n8n); esta
+// API só faz o CRUD para o dono editar pela tela do deskcomm.
+// Já existia no banco (criada via SQL do n8n). `origem_id`, sobra de um plano
+// de sincronismo abandonado, fica de fora de propósito.
+export const respostasRapidas = pgTable(
+    'respostas_rapidas',
+    {
+        id: bigserial('id', { mode: 'number' }).primaryKey(),
+        // NULL = vale para qualquer conta.
+        contaId: varchar('conta_id'),
+        titulo: varchar('titulo').notNull(),
+        // Aceita o marcador [cumprimento] (o n8n troca por Bom dia/Boa tarde/Boa noite).
+        corpo: text('corpo').notNull(),
+        // Frases do CLIENTE, já normalizadas como normalizar_texto() do banco.
+        gatilhos: text('gatilhos').array().notNull().default(sql`'{}'::text[]`),
+        contexto: varchar('contexto').notNull().default('qualquer'),
+        midiaChave: varchar('midia_chave'),
+        prioridade: integer('prioridade').notNull().default(100),
+        maxCharsMsg: integer('max_chars_msg').notNull().default(60),
+        ativo: boolean('ativo').notNull().default(true),
+        criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
+        atualizadoEm: timestamp('atualizado_em', { withTimezone: true }).notNull().defaultNow(),
+    },
+    (table) => [
+        index('idx_respostas_rapidas_busca').on(table.ativo, table.contexto, table.prioridade),
+        index('idx_respostas_rapidas_gatilhos').using('gin', table.gatilhos),
+        check('respostas_rapidas_contexto_check', sql`${table.contexto} in ('abertura', 'qualquer')`),
     ]
 );
 
