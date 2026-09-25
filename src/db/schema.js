@@ -14,7 +14,6 @@ import {
     numeric,
     jsonb,
     index,
-    uniqueIndex,
     unique,
     check,
 } from 'drizzle-orm/pg-core';
@@ -204,13 +203,12 @@ export const respostasRapidas = pgTable(
         ativo: boolean('ativo').notNull().default(true),
         criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
         atualizadoEm: timestamp('atualizado_em', { withTimezone: true }).notNull().defaultNow(),
-        // id da resposta salva (message_templates) no deskcomm, que espelha para
-        // cá a cada salvamento. NULL = criada direto aqui (SQL ou esta API); o
-        // espelho nunca toca nessas.
-        origemId: uuid('origem_id'),
+        // O que a equipe digita depois da barra no Inbox do deskcomm (`/frete`).
+        // Sem a barra. NULL = a resposta não tem atalho. O n8n não lê esta
+        // coluna: ela existe para a MESMA resposta servir à equipe e ao bot.
+        atalho: varchar('atalho', { length: 40 }),
     },
     (table) => [
-        uniqueIndex('respostas_rapidas_origem_uidx').on(table.origemId).where(sql`${table.origemId} is not null`),
         index('idx_respostas_rapidas_busca').on(table.ativo, table.contexto, table.prioridade),
         index('idx_respostas_rapidas_gatilhos').using('gin', table.gatilhos),
         check('respostas_rapidas_contexto_check', sql`${table.contexto} in ('abertura', 'qualquer')`),
