@@ -3,6 +3,7 @@ import { respostaRapidaService } from '../services/resposta-rapida.service.js';
 import { normalizarGatilhos } from '../utils/normalizar.util.js';
 
 const idSchema = z.coerce.number().int().positive();
+const origemIdSchema = z.string().uuid();
 
 const listarSchema = z.object({
     conta_id: z.string().trim().min(1).max(100).optional(),
@@ -33,6 +34,13 @@ const criarSchema = z.object({
     conta_id: campos.conta_id.optional(),
     midia_chave: campos.midia_chave.optional(),
     ativo: campos.ativo.default(true),
+});
+
+// Espelho: o deskcomm manda a resposta INTEIRA a cada salvamento. Campo
+// ausente volta ao padrão, senão um valor apagado lá continuaria valendo aqui.
+const espelharSchema = criarSchema.extend({
+    conta_id: campos.conta_id.default(null),
+    midia_chave: campos.midia_chave.default(null),
 });
 
 // Campo ausente não é alterado — nunca zerar o que não veio.
@@ -70,6 +78,7 @@ function formatar(linha) {
         prioridade: linha.prioridade,
         max_chars_msg: linha.maxCharsMsg,
         ativo: linha.ativo,
+        origem_id: linha.origemId,
         criado_em: linha.criadoEm,
         atualizado_em: linha.atualizadoEm,
     };
@@ -131,6 +140,31 @@ export const respostaRapidaController = {
         const atualizada = await respostaRapidaService.atualizar(id.data, valores);
         if (!atualizada) return res.status(404).json({ success: false, error: 'Resposta rápida não encontrada' });
         res.json({ success: true, data: formatar(atualizada) });
+    },
+
+    async espelhar(req, res) {
+        const origemId = origemIdSchema.safeParse(req.params.origemId);
+        if (!origemId.success) return res.status(400).json({ success: false, error: 'origem_id inválido' });
+
+        const parsed = espelharSchema.safeParse(req.body);
+        if (!parsed.success) return erroValidacao(res, parsed);
+
+        const valores = paraColunas(parsed.data);
+        if (valores.ativo && valores.gatilhos.length === 0) {
+            return res.status(422).json({ success: false, error: ERRO_SEM_GATILHO });
+        }
+
+        const linha = await respostaRapidaService.espelhar(origemId.data, valores);
+        res.json({ success: true, data: formatar(linha) });
+    },
+
+    async removerEspelho(req, res) {
+        const origemId = origemIdSchema.safeParse(req.params.origemId);
+        if (!origemId.success) return res.status(400).json({ success: false, error: 'origem_id inválido' });
+
+        const existia = await respostaRapidaService.removerEspelho(origemId.data);
+        if (!existia) return res.status(404).json({ success: false, error: 'Resposta rápida não encontrada' });
+        res.status(204).end();
     },
 
     async remover(req, res) {

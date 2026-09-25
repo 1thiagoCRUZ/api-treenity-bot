@@ -14,6 +14,7 @@ import {
     numeric,
     jsonb,
     index,
+    uniqueIndex,
     unique,
     check,
 } from 'drizzle-orm/pg-core';
@@ -184,8 +185,7 @@ export const vendas = pgTable(
 // do cliente contém um dos gatilhos. O n8n lê direto desta tabela a cada
 // mensagem (colar-no-n8n/11-Buscar-Resposta-Rapida.sql, no repo do n8n); esta
 // API só faz o CRUD para o dono editar pela tela do deskcomm.
-// Já existia no banco (criada via SQL do n8n). `origem_id`, sobra de um plano
-// de sincronismo abandonado, fica de fora de propósito.
+// Já existia no banco (criada via SQL do n8n).
 export const respostasRapidas = pgTable(
     'respostas_rapidas',
     {
@@ -204,8 +204,13 @@ export const respostasRapidas = pgTable(
         ativo: boolean('ativo').notNull().default(true),
         criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
         atualizadoEm: timestamp('atualizado_em', { withTimezone: true }).notNull().defaultNow(),
+        // id da resposta salva (message_templates) no deskcomm, que espelha para
+        // cá a cada salvamento. NULL = criada direto aqui (SQL ou esta API); o
+        // espelho nunca toca nessas.
+        origemId: uuid('origem_id'),
     },
     (table) => [
+        uniqueIndex('respostas_rapidas_origem_uidx').on(table.origemId).where(sql`${table.origemId} is not null`),
         index('idx_respostas_rapidas_busca').on(table.ativo, table.contexto, table.prioridade),
         index('idx_respostas_rapidas_gatilhos').using('gin', table.gatilhos),
         check('respostas_rapidas_contexto_check', sql`${table.contexto} in ('abertura', 'qualquer')`),

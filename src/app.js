@@ -96,6 +96,8 @@ server.listen(porta, () => {
     console.log(`   - POST http://localhost:${porta}/api/respostas-rapidas`);
     console.log(`   - PATCH http://localhost:${porta}/api/respostas-rapidas/:id`);
     console.log(`   - DELETE http://localhost:${porta}/api/respostas-rapidas/:id`);
+    console.log(`   - PUT  http://localhost:${porta}/api/respostas-rapidas/origem/:origemId`);
+    console.log(`   - DELETE http://localhost:${porta}/api/respostas-rapidas/origem/:origemId`);
     console.log(`Sockets enabled at /chat namespace`);
     console.log(`======================================================`);
     startCronJobs();

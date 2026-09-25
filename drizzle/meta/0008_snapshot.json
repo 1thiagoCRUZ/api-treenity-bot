@@ -1,5 +1,5 @@
 {
-  "id": "61617362-078d-4841-9892-9618b1f5a924",
+  "id": "3780c069-b5a6-42be-8b0d-b9df62ce698c",
   "prevId": "2bbb4558-6d5e-4ba9-9861-4947b31d74ab",
   "version": "7",
   "dialect": "postgresql",
@@ -702,9 +702,31 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "origem_id": {
+          "name": "origem_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
+        "respostas_rapidas_origem_uidx": {
+          "name": "respostas_rapidas_origem_uidx",
+          "columns": [
+            {
+              "expression": "origem_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"respostas_rapidas\".\"origem_id\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "idx_respostas_rapidas_busca": {
           "name": "idx_respostas_rapidas_busca",
           "columns": [

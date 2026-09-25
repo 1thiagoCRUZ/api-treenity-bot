@@ -1,4 +1,4 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { respostasRapidas } from '../db/schema.js';
 
@@ -37,6 +37,31 @@ export const respostaRapidaService = {
             .where(eq(respostasRapidas.id, id))
             .returning();
         return atualizada ?? null;
+    },
+
+    // Espelho do deskcomm: cria ou substitui a linha daquela resposta salva.
+    // Idempotente — repetir o mesmo salvamento não duplica nada, então quem
+    // chama pode tentar de novo à vontade depois de uma falha de rede.
+    async espelhar(origemId, valores) {
+        const [linha] = await db
+            .insert(respostasRapidas)
+            .values({ ...valores, origemId })
+            .onConflictDoUpdate({
+                target: respostasRapidas.origemId,
+                targetWhere: sql`${respostasRapidas.origemId} is not null`,
+                set: { ...valores, atualizadoEm: new Date() },
+            })
+            .returning();
+        return linha;
+    },
+
+    // Retorna `false` se não havia linha espelhada daquela resposta salva.
+    async removerEspelho(origemId) {
+        const removidas = await db
+            .delete(respostasRapidas)
+            .where(eq(respostasRapidas.origemId, origemId))
+            .returning({ id: respostasRapidas.id });
+        return removidas.length > 0;
     },
 
     // Retorna `false` se a linha não existia.
