@@ -13,6 +13,10 @@ router.get('/', requireAuth, requirePainelAdmin, asyncHandler(atendimentoControl
 // Chamada pelo n8n (server-to-server), não por usuário logado.
 router.post('/sinalizar', requireN8nSecret, asyncHandler(atendimentoController.sinalizar));
 
+// Chamada pelo DeskComm ("Reativar bot" no Inbox), com o token SSO do usuário
+// que clicou. Precisa vir ANTES de `/:id/...` só por clareza — o caminho não colide.
+router.post('/devolver-ao-bot', requireAuth, asyncHandler(atendimentoController.devolverAoBot));
+
 // Chamada pelo painel — qualquer usuário autenticado pode encerrar um
 // atendimento que assumiu manualmente.
 router.post('/:id/encerrar', requireAuth, asyncHandler(atendimentoController.encerrar));

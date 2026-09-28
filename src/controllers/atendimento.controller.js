@@ -1,11 +1,18 @@
 import { z } from 'zod';
 import { atendimentoService } from '../services/atendimento.service.js';
+import { deskcommService } from '../services/deskcomm.service.js';
 import { emitAlertaAtendimento } from '../sockets/realtime.js';
 import { decodificarCursor } from '../utils/cursor.util.js';
 
 const sinalizarSchema = z.object({
     id_face: z.string().min(1),
     motivo: z.string().min(1).max(500),
+});
+
+// O número pode estar gravado com e sem o nono dígito — o DeskComm manda as
+// duas grafias, e o que casar é liberado.
+const devolverSchema = z.object({
+    id_faces: z.array(z.string().min(1).max(64)).min(1).max(6),
 });
 
 // `desde` é inclusivo e `ate` é exclusivo, sobre a última atividade do atendimento.
@@ -67,7 +74,25 @@ export const atendimentoController = {
             sinalizadoEm: atendimento.atencaoSinalizadaEm,
         });
 
+        // A conversa vai para a Fila do Inbox do DeskComm. Esperado (com teto
+        // de 5s) e não solto: no Render o processo não mata a promessa, mas
+        // assim o log do aviso sai junto do da sinalização.
+        await deskcommService.avisarPediuAjuda({ idFace: id_face, motivo });
+
         res.json({ success: true, data: atendimento });
+    },
+
+    // Chamada pelo DeskComm quando alguém clica em "Reativar bot" no Inbox:
+    // solta a trava `precisa_atencao_humana` do atendimento aberto desse
+    // cliente, e o gate do n8n deixa o bot responder de novo. Diferente de
+    // `encerrar`, NÃO fecha o atendimento — a venda em andamento continua.
+    async devolverAoBot(req, res) {
+        const parsed = devolverSchema.safeParse(req.body);
+        if (!parsed.success) {
+            return res.status(400).json({ success: false, error: 'id_faces é obrigatório' });
+        }
+        const liberados = await atendimentoService.devolverAoBot(parsed.data.id_faces);
+        res.json({ success: true, data: { liberados } });
     },
 
     // Chamada pelo painel (usuário autenticado, qualquer papel) quando um

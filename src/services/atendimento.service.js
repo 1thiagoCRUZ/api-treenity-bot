@@ -201,6 +201,27 @@ export const atendimentoService = {
         return { ...atualizado, clienteNome: linha.clienteNome };
     },
 
+    // Tira a trava de "precisa de atenção humana" dos atendimentos ABERTOS do
+    // cliente (qualquer das grafias do número). Devolve quantos foram liberados
+    // — zero não é erro: o cliente pode nunca ter sido sinalizado.
+    async devolverAoBot(idFaces) {
+        const liberados = await db
+            .update(atendimentos)
+            .set({ precisaAtencaoHumana: false, atualizadoEm: new Date() })
+            .where(and(
+                eq(atendimentos.precisaAtencaoHumana, true),
+                // `coalesce` como no gate do n8n: atendimento sem etapa (NULL) está
+                // aberto, e `<>` sozinho o deixaria de fora com a trava armada.
+                sql`coalesce(${atendimentos.statusFunil}, '') <> 'Fechada'`,
+                inArray(
+                    atendimentos.clienteId,
+                    db.select({ id: clientes.id }).from(clientes).where(inArray(clientes.idFace, idFaces)),
+                ),
+            ))
+            .returning({ id: atendimentos.id });
+        return liberados.length;
+    },
+
     // Encerra manualmente um atendimento (sem passar pelo fechamento de venda).
     // Ao virar 'Fechada', a próxima mensagem daquele cliente abre um
     // atendimento novo (sem sinalização) — é assim que a IA volta a responder.
