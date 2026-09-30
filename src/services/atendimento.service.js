@@ -225,7 +225,8 @@ export const atendimentoService = {
 
     // Fechar pelo Inbox do DeskComm: a equipe conduziu o atendimento e diz
     // como terminou. Encerra o atendimento ABERTO do cliente (qualquer grafia
-    // do número) e, se teve venda, registra a venda com o valor informado.
+    // do número) e, se teve venda, registra a venda com o valor informado —
+    // ou atualiza o valor da que o CADU já gravou, sem criar outra.
     //
     // A venda nasce "Aguardando Pagamento", como as do bot: quem confirma o
     // pagamento é o mesmo fluxo de sempre (tarefa "Conferir pagamento PIX" no
@@ -249,6 +250,26 @@ export const atendimentoService = {
 
             let vendaId = null;
             if (venda) {
+                // O CADU já pode ter gravado a venda quando o produtor escolheu a
+                // forma de pagamento (cartão/boleto seguem para o time, que fecha
+                // aqui). Aí vale o valor FINAL que a equipe informou — com o
+                // desconto que ela deu, se deu — e os itens do CADU ficam. Criar
+                // outra linha contaria a mesma venda duas vezes no faturamento.
+                const [existente] = await tx
+                    .select({ id: vendas.id })
+                    .from(vendas)
+                    .where(eq(vendas.atendimentoId, aberto.id))
+                    .orderBy(desc(vendas.criadoEm))
+                    .limit(1);
+                if (existente) {
+                    await tx
+                        .update(vendas)
+                        .set({ valorTotal: venda.valorTotal })
+                        .where(eq(vendas.id, existente.id));
+                    vendaId = existente.id;
+                }
+            }
+            if (venda && !vendaId) {
                 const [criada] = await tx
                     .insert(vendas)
                     .values({
