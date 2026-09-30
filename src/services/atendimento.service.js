@@ -2,6 +2,7 @@ import { and, asc, count, desc, eq, exists, gte, inArray, lt, ne, notExists, or,
 import { db } from '../db/client.js';
 import { atendimentos, clientes, mensagens, vendas } from '../db/schema.js';
 import { codificarCursor } from '../utils/cursor.util.js';
+import { STATUS_AGUARDANDO } from './venda.service.js';
 
 const LISTA_LIMITE_PADRAO = 30;
 const LISTA_LIMITE_MAXIMO = 100;
@@ -220,6 +221,54 @@ export const atendimentoService = {
             ))
             .returning({ id: atendimentos.id });
         return liberados.length;
+    },
+
+    // Fechar pelo Inbox do DeskComm: a equipe conduziu o atendimento e diz
+    // como terminou. Encerra o atendimento ABERTO do cliente (qualquer grafia
+    // do número) e, se teve venda, registra a venda com o valor informado.
+    //
+    // A venda nasce "Aguardando Pagamento", como as do bot: quem confirma o
+    // pagamento é o mesmo fluxo de sempre (tarefa "Conferir pagamento PIX" no
+    // DeskComm), e o faturamento do painel passa a contar a venda da equipe.
+    //
+    // Devolve null quando o cliente não tem atendimento aberto — conversa que
+    // nunca passou pelo bot, ou já encerrada.
+    async encerrarPorCliente(idFaces, venda) {
+        return db.transaction(async (tx) => {
+            const [aberto] = await tx
+                .select({ id: atendimentos.id })
+                .from(atendimentos)
+                .innerJoin(clientes, eq(atendimentos.clienteId, clientes.id))
+                .where(and(
+                    inArray(clientes.idFace, idFaces),
+                    sql`coalesce(${atendimentos.statusFunil}, '') <> 'Fechada'`,
+                ))
+                .orderBy(desc(atendimentos.criadoEm))
+                .limit(1);
+            if (!aberto) return null;
+
+            let vendaId = null;
+            if (venda) {
+                const [criada] = await tx
+                    .insert(vendas)
+                    .values({
+                        atendimentoId: aberto.id,
+                        itensPedido: 'Venda fechada pela equipe no Inbox',
+                        valorProdutos: venda.valorTotal,
+                        valorTotal: venda.valorTotal,
+                        statusVenda: STATUS_AGUARDANDO,
+                    })
+                    .returning({ id: vendas.id });
+                vendaId = criada.id;
+            }
+
+            await tx
+                .update(atendimentos)
+                .set({ statusFunil: 'Fechada', precisaAtencaoHumana: false, atualizadoEm: new Date() })
+                .where(eq(atendimentos.id, aberto.id));
+
+            return { atendimentoId: aberto.id, vendaId };
+        });
     },
 
     // Encerra manualmente um atendimento (sem passar pelo fechamento de venda).

@@ -17,6 +17,10 @@ router.post('/sinalizar', requireN8nSecret, asyncHandler(atendimentoController.s
 // que clicou. Precisa vir ANTES de `/:id/...` só por clareza — o caminho não colide.
 router.post('/devolver-ao-bot', requireAuth, asyncHandler(atendimentoController.devolverAoBot));
 
+// Chamada pelo DeskComm quando a equipe fecha a conversa no Inbox dizendo como
+// terminou (com ou sem venda). Token SSO do usuário que clicou.
+router.post('/encerrar-por-cliente', requireAuth, asyncHandler(atendimentoController.encerrarPorCliente));
+
 // Chamada pelo painel — qualquer usuário autenticado pode encerrar um
 // atendimento que assumiu manualmente.
 router.post('/:id/encerrar', requireAuth, asyncHandler(atendimentoController.encerrar));

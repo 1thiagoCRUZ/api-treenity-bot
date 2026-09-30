@@ -15,6 +15,12 @@ const devolverSchema = z.object({
     id_faces: z.array(z.string().min(1).max(64)).min(1).max(6),
 });
 
+// Fechar pelo Inbox: `venda` ausente = terminou sem venda.
+const encerrarPorClienteSchema = z.object({
+    id_faces: z.array(z.string().min(1).max(64)).min(1).max(6),
+    venda: z.object({ valor_total: z.number().positive().max(10_000_000) }).optional(),
+});
+
 // `desde` é inclusivo e `ate` é exclusivo, sobre a última atividade do atendimento.
 const listarSchema = z.object({
     canal: z.string().min(1).max(60).optional(),
@@ -80,6 +86,24 @@ export const atendimentoController = {
         await deskcommService.avisarPediuAjuda({ idFace: id_face, motivo });
 
         res.json({ success: true, data: atendimento });
+    },
+
+    // Chamada pelo DeskComm quando alguém fecha a conversa no Inbox dizendo
+    // como terminou. 404 quando não há atendimento aberto para o cliente.
+    async encerrarPorCliente(req, res) {
+        const parsed = encerrarPorClienteSchema.safeParse(req.body);
+        if (!parsed.success) {
+            return res.status(400).json({ success: false, error: 'id_faces é obrigatório; venda.valor_total deve ser positivo' });
+        }
+        const { id_faces, venda } = parsed.data;
+        const resultado = await atendimentoService.encerrarPorCliente(
+            id_faces,
+            venda ? { valorTotal: venda.valor_total } : null,
+        );
+        if (!resultado) {
+            return res.status(404).json({ success: false, error: 'Nenhum atendimento aberto para esse cliente' });
+        }
+        res.json({ success: true, data: resultado });
     },
 
     // Chamada pelo DeskComm quando alguém clica em "Reativar bot" no Inbox:
