@@ -2,6 +2,8 @@ import { chatService } from '../services/chat.service.js';
 import { verifyAccessToken } from '../utils/jwt.util.js';
 import { SALA_DO_PAINEL } from './realtime.js';
 
+const salaDoUsuario = (id) => `usuario:${id}`;
+
 export default function configureChatSockets(io) {
     const chatNamespace = io.of('/chat');
 
@@ -23,6 +25,11 @@ export default function configureChatSockets(io) {
 
     chatNamespace.on('connection', (socket) => {
         console.log(`[Socket] Cliente conectado: ${socket.id} (usuário ${socket.usuario.id})`);
+
+        // Sala pessoal: é por ela que chega o aviso de mensagem nova do chat da
+        // equipe quando a pessoa NÃO está com aquela conversa aberta (o selo do
+        // menu e a lista de conversas). Decidida pelo token, nunca pelo cliente.
+        socket.join(salaDoUsuario(socket.usuario.id));
 
         // Avisos em tempo real de mensagens/atendimentos/vendas: só o painel admin
         // (mesma regra de requirePainelAdmin). A sala é decidida aqui, no servidor,
@@ -88,6 +95,17 @@ export default function configureChatSockets(io) {
                 const mensagem = await chatService.saveMessage(conversaId, socket.usuario.id, conteudo);
 
                 chatNamespace.to(conversaId).emit('receive_message', mensagem);
+
+                // Avisa o outro participante na sala pessoal dele, esteja ou não com
+                // a conversa aberta: é o que acende o contador de não lidas.
+                const conversa = await chatService.getConversaById(conversaId);
+                if (conversa) {
+                    const outro = conversa.adminId === socket.usuario.id ? conversa.funcionarioId : conversa.adminId;
+                    chatNamespace.to(salaDoUsuario(outro)).emit('chat_nova_mensagem', {
+                        conversaId,
+                        remetenteId: socket.usuario.id,
+                    });
+                }
             } catch (error) {
                 console.error('[Socket] Erro ao enviar mensagem:', error.message);
                 socket.emit('chat_error', { error: 'Falha ao processar mensagem.' });

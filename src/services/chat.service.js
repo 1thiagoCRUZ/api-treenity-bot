@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, or } from 'drizzle-orm';
+import { and, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { chatConversas, chatMensagens, usuarios } from '../db/schema.js';
 import { encrypt, decrypt } from '../utils/crypto.util.js';
@@ -55,6 +55,7 @@ export const chatService = {
             .where(inArray(chatMensagens.conversaId, conversas.map((c) => c.id)))
             .orderBy(chatMensagens.conversaId, desc(chatMensagens.criadoEm));
         const ultimaPorConversa = new Map(ultimas.map((m) => [m.conversaId, m]));
+        const naoLidasPorConversa = await this.contarNaoLidas(usuarioId, conversas.map((c) => c.id));
 
         return conversas.flatMap((c) => {
             const outroUsuario = outroPorId.get(outroDe(c));
@@ -66,6 +67,7 @@ export const chatService = {
                     id: c.id,
                     atualizadoEm: c.atualizadoEm,
                     outroUsuario,
+                    naoLidas: naoLidasPorConversa.get(c.id) ?? 0,
                     ultimaMensagem: ultima
                         ? {
                               id: ultima.id,
@@ -77,6 +79,47 @@ export const chatService = {
                 },
             ];
         });
+    },
+
+    // Mensagens do OUTRO participante que chegaram depois da última leitura do
+    // usuário, por conversa. "Leitura" é a coluna do lado em que ele está na
+    // conversa (admin_lido_em ou funcionario_lido_em); nula = nunca abriu.
+    // Sem `conversaIds`, conta em todas as conversas de que ele participa.
+    async contarNaoLidas(usuarioId, conversaIds) {
+        if (conversaIds && conversaIds.length === 0) return new Map();
+        const filtroDeConversa = conversaIds
+            ? sql`and c.id in (${sql.join(conversaIds.map((id) => sql`${id}::uuid`), sql`, `)})`
+            : sql``;
+        const { rows } = await db.execute(sql`
+            select m.conversa_id as "conversaId", count(*)::int as "naoLidas"
+            from chat_mensagens m
+            join chat_conversas c on c.id = m.conversa_id
+            where (c.admin_id = ${usuarioId} or c.funcionario_id = ${usuarioId})
+              ${filtroDeConversa}
+              and m.remetente_id <> ${usuarioId}
+              and m.criado_em > coalesce(
+                    case when c.admin_id = ${usuarioId} then c.admin_lido_em else c.funcionario_lido_em end,
+                    '-infinity'::timestamptz)
+            group by m.conversa_id
+        `);
+        return new Map(rows.map((r) => [r.conversaId, r.naoLidas]));
+    },
+
+    // Total de mensagens não lidas do usuário, somando todas as conversas. É o
+    // número do selo do "Chat da equipe" no menu do DeskComm.
+    async totalNaoLidas(usuarioId) {
+        const porConversa = await this.contarNaoLidas(usuarioId);
+        let total = 0;
+        for (const n of porConversa.values()) total += n;
+        return total;
+    },
+
+    // Marca a conversa como lida até agora, do lado do usuário. Quem chama já
+    // conferiu que ele participa (controller/socket).
+    async marcarComoLida(conversa, usuarioId) {
+        const agora = new Date();
+        const lado = conversa.adminId === usuarioId ? { adminLidoEm: agora } : { funcionarioLidoEm: agora };
+        await db.update(chatConversas).set(lado).where(eq(chatConversas.id, conversa.id));
     },
 
     // Busca uma conversa pelo ID (usado para checar quem são os participantes)

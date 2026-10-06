@@ -72,6 +72,11 @@ export const chatConversas = pgTable(
         atualizadoEm: timestamp('atualizado_em', { withTimezone: true })
             .notNull()
             .default(sql`timezone('utc'::text, now())`),
+        // Até onde cada participante leu. Nulo = nunca abriu a conversa, e aí toda
+        // mensagem do outro conta como não lida. É o que alimenta o contador de
+        // mensagens novas do Chat da equipe no DeskComm.
+        adminLidoEm: timestamp('admin_lido_em', { withTimezone: true }),
+        funcionarioLidoEm: timestamp('funcionario_lido_em', { withTimezone: true }),
     },
     (table) => [unique('chat_conversas_admin_id_funcionario_id_key').on(table.adminId, table.funcionarioId)]
 );

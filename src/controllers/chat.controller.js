@@ -17,6 +17,29 @@ export const chatController = {
         res.json({ success: true, data: conversas });
     },
 
+    // Total de mensagens não lidas do usuário autenticado (selo do menu).
+    async naoLidas(req, res) {
+        const total = await chatService.totalNaoLidas(req.usuario.id);
+        res.json({ success: true, data: { total } });
+    },
+
+    // Marca a conversa como lida, do lado do usuário autenticado.
+    async marcarLida(req, res) {
+        const parsedId = conversaIdSchema.safeParse(req.params.conversaId);
+        if (!parsedId.success) {
+            return res.status(400).json({ success: false, error: 'ID da conversa inválido' });
+        }
+        const conversa = await chatService.getConversaById(parsedId.data);
+        if (!conversa) {
+            return res.status(404).json({ success: false, error: 'Conversa não encontrada' });
+        }
+        if (![conversa.adminId, conversa.funcionarioId].includes(req.usuario.id)) {
+            return res.status(403).json({ success: false, error: 'Você não tem acesso a esta conversa' });
+        }
+        await chatService.marcarComoLida(conversa, req.usuario.id);
+        res.json({ success: true, data: { conversaId: conversa.id } });
+    },
+
     // Rota para buscar o histórico ou criar uma conversa
     async initChat(req, res) {
         const parsed = idsSchema.safeParse(req.body);
