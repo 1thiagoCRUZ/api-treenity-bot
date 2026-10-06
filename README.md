@@ -126,9 +126,12 @@ O painel recebe avisos ao vivo quando o n8n grava mensagens, atendimentos ou ven
 
 Além do Socket.io (namespace `/chat`), o chat tem três rotas REST, todas com `Authorization: Bearer <accessToken>` e restritas às conversas de que o usuário autenticado participa:
 
-- `GET /api/chat/conversas` → lista as conversas do usuário, da mais recente pra mais antiga: `[{ id, atualizadoEm, outroUsuario: { id, nome, papel }, ultimaMensagem: { id, remetenteId, conteudo, criadoEm } | null }]`. `conteudo` vem descriptografado e truncado em 140 caracteres (`null` se a mensagem estiver ilegível); `ultimaMensagem` é `null` em conversa aberta que ainda não teve mensagem. Conversas cujo outro participante não existe mais ou está inativo ficam de fora. Serve pra montar a lista lateral do chat.
+- `GET /api/chat/conversas` → lista as conversas do usuário, da mais recente pra mais antiga: `[{ id, atualizadoEm, outroUsuario: { id, nome, papel }, naoLidas, ultimaMensagem: { id, remetenteId, conteudo, criadoEm } | null }]`. `conteudo` vem descriptografado e truncado em 140 caracteres (`null` se a mensagem estiver ilegível); `ultimaMensagem` é `null` em conversa aberta que ainda não teve mensagem. Conversas cujo outro participante não existe mais ou está inativo ficam de fora. Serve pra montar a lista lateral do chat.
 - `POST /api/chat/init` `{ adminId, funcionarioId }` → busca ou cria a conversa entre dois usuários (o autenticado precisa ser um deles).
 - `GET /api/chat/history/:conversaId` → histórico completo, descriptografado, do mais antigo pro mais novo.
+- `GET /api/chat/nao-lidas` → `{ total }`: mensagens do outro participante que chegaram depois da última leitura do usuário, somando todas as conversas (selo do "Chat da equipe" no DeskComm).
+- `POST /api/chat/conversas/:conversaId/lida` → marca a conversa como lida até agora, do lado do usuário autenticado (`admin_lido_em` ou `funcionario_lido_em` em `chat_conversas`, migration `0011`).
+- Socket `/chat`: todo usuário entra na sala pessoal `usuario:<id>`; a cada `send_message`, o outro participante recebe `chat_nova_mensagem` `{ conversaId, remetenteId }` nela, mesmo sem estar com a conversa aberta.
 
 ## Atendimentos — sinalização para intervenção humana
 

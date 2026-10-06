@@ -78,6 +78,13 @@
       "when": 1790374013549,
       "tag": "0010_respostas_rapidas_sem_espelho",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791318787600,
+      "tag": "0011_chat_lido_em",
+      "breakpoints": true
     }
   ]
 }
