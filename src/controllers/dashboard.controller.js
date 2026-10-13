@@ -7,6 +7,7 @@ const vendasQuerySchema = z.object({
     limit: z.coerce.number().int().min(1).max(200).optional(),
     status: z.string().min(1).max(60).optional(),
     canal: z.string().min(1).max(60).optional(),
+    id_face: z.string().min(1).max(64).optional(),
     desde: z.coerce.date().optional(),
     ate: z.coerce.date().optional(),
     cursor: z.string().max(300).optional(),
@@ -41,7 +42,8 @@ export const dashboardController = {
         if (!parsed.success) {
             return res.status(400).json({ success: false, error: 'Parâmetros inválidos', detalhes: parsed.error.flatten() });
         }
-        const { cursor: cursorTexto, ...filtros } = parsed.data;
+        const { cursor: cursorTexto, id_face: idFace, ...filtros } = parsed.data;
+        filtros.idFace = idFace;
 
         let cursor;
         if (cursorTexto) {

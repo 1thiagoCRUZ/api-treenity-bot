@@ -176,6 +176,10 @@ export const vendas = pgTable(
         // valida PIX sozinha). Ver POST /api/vendas/:id/pagamento.
         pagoEm: timestamp('pago_em', { withTimezone: true }),
         pagamentoConfirmadoPor: varchar('pagamento_confirmado_por'),
+        // pix | credito | debito | boleto — escolhido pelo cliente na conversa.
+        formaPagamento: varchar('forma_pagamento'),
+        // Nome de quem fechou a venda pelo Inbox. Vazio = o bot (CADU) fechou.
+        fechadaPor: varchar('fechada_por'),
     },
     (table) => [
         // "Tem venda?" e vendas por atendimento (lista de atendimentos do painel).
