@@ -1,8 +1,9 @@
 import '../config/env.js';
 
 // Avisos da API do bot para o DeskComm (TreenityCRM), onde o Inbox mostra as
-// conversas do WhatsApp. Hoje só um: "o bot chamou o especialista", para a
-// conversa ir para a Fila do Inbox com o bot calado.
+// conversas do WhatsApp. Dois: "o bot chamou o especialista" (a conversa vai
+// para a Fila do Inbox com o bot calado) e "venda nova" (vira aviso na Central,
+// para quem entra de manhã saber o que aconteceu de noite).
 //
 // OPCIONAL: sem DESKCOMM_URL e DESKCOMM_CHAVE_WHATSAPP o aviso não é mandado e
 // o resto funciona como antes (o gate do n8n continua calando o bot). A chave é
@@ -14,7 +15,38 @@ import '../config/env.js';
 
 const TEMPO_MAXIMO_MS = 5_000;
 
+async function postar(caminho, corpo, rotulo) {
+    const url = process.env.DESKCOMM_URL;
+    const chave = process.env.DESKCOMM_CHAVE_WHATSAPP;
+    if (!url || !chave) return 'nao_configurado';
+    try {
+        const res = await fetch(`${url.replace(/\/$/, '')}${caminho}`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${chave}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(corpo),
+            signal: AbortSignal.timeout(TEMPO_MAXIMO_MS),
+        });
+        if (!res.ok) {
+            console.error(`[deskcomm] ${rotulo} recusado: HTTP ${res.status}`);
+            return 'falhou';
+        }
+        return 'avisado';
+    } catch (err) {
+        console.error(`[deskcomm] ${rotulo} falhou:`, err?.message ?? err);
+        return 'falhou';
+    }
+}
+
 export const deskcommService = {
+    // Venda gravada pelo CADU. `venda` = { idFace, cliente, total, itens }.
+    avisarVendaNova({ idFace, cliente, total, itens, idVenda }) {
+        return postar(
+            '/api/treenity-bot/whatsapp/venda-nova',
+            { id_face: idFace, cliente: cliente ?? null, total: Number(total) || 0, itens: itens ?? null, id_venda: idVenda },
+            'aviso de venda nova',
+        );
+    },
+
     async avisarPediuAjuda({ idFace, motivo }) {
         const url = process.env.DESKCOMM_URL;
         const chave = process.env.DESKCOMM_CHAVE_WHATSAPP;

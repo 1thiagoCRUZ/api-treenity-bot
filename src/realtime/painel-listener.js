@@ -1,6 +1,10 @@
 import os from 'os';
 import pg from 'pg';
 import { requireEnv } from '../config/env.js';
+import { eq } from 'drizzle-orm';
+import { db } from '../db/client.js';
+import { atendimentos, clientes, vendas } from '../db/schema.js';
+import { deskcommService } from '../services/deskcomm.service.js';
 import { emitPainelEvento } from '../sockets/realtime.js';
 
 // Ponte banco -> tempo real do painel admin.
@@ -51,6 +55,29 @@ function converterAviso(bruto) {
     }
 }
 
+// Venda nova => aviso persistente na Central do DeskComm (não depende de ter
+// alguém com o sistema aberto). Nunca lança: é um aviso, não a venda.
+async function avisarVendaNoDeskcomm(idVenda) {
+    try {
+        const [linha] = await db
+            .select({
+                total: vendas.valorTotal,
+                itens: vendas.itensPedido,
+                cliente: clientes.nome,
+                idFace: clientes.idFace,
+            })
+            .from(vendas)
+            .innerJoin(atendimentos, eq(atendimentos.id, vendas.atendimentoId))
+            .innerJoin(clientes, eq(clientes.id, atendimentos.clienteId))
+            .where(eq(vendas.id, idVenda))
+            .limit(1);
+        if (!linha) return;
+        await deskcommService.avisarVendaNova({ ...linha, idVenda });
+    } catch (err) {
+        console.error('[Painel] aviso de venda ao DeskComm falhou:', err?.message ?? err);
+    }
+}
+
 function agendarReconexao(motivo) {
     if (parado) return;
     const espera = Math.min(BACKOFF_MAXIMO_MS, BACKOFF_INICIAL_MS * 2 ** tentativas);
@@ -90,6 +117,7 @@ async function conectar() {
         if (aviso.channel !== CANAL || !aviso.payload) return;
         const evento = converterAviso(aviso.payload);
         if (evento) emitPainelEvento(evento);
+        if (evento?.tipo === 'venda' && evento.op === 'INSERT' && evento.id) void avisarVendaNoDeskcomm(evento.id);
     });
 
     try {
