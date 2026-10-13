@@ -264,7 +264,7 @@ export const atendimentoService = {
                 if (existente) {
                     await tx
                         .update(vendas)
-                        .set({ valorTotal: venda.valorTotal })
+                        .set({ valorTotal: venda.valorTotal, fechadaPor: venda.fechadaPor ?? null })
                         .where(eq(vendas.id, existente.id));
                     vendaId = existente.id;
                 }
@@ -278,6 +278,7 @@ export const atendimentoService = {
                         valorProdutos: venda.valorTotal,
                         valorTotal: venda.valorTotal,
                         statusVenda: STATUS_AGUARDANDO,
+                        fechadaPor: venda.fechadaPor ?? null,
                     })
                     .returning({ id: vendas.id });
                 vendaId = criada.id;

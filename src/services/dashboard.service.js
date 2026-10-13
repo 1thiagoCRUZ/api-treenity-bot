@@ -96,6 +96,7 @@ export async function getSalesDetails(options = {}) {
     if (options.canal) filtros.push(eq(atendimentos.canal, options.canal)); // filtrado no banco, antes do limit
     if (options.desde) filtros.push(gte(vendas.criadoEm, options.desde));
     if (options.ate) filtros.push(lt(vendas.criadoEm, options.ate));
+    if (options.idFace) filtros.push(eq(clientes.idFace, options.idFace)); // vendas de UM cliente
 
     // O cursor só restringe a página, nunca o resumo.
     const condicoesDaPagina = [...filtros];
@@ -139,6 +140,7 @@ export async function getSalesDetails(options = {}) {
         })
         .from(vendas)
         .leftJoin(atendimentos, eq(vendas.atendimentoId, atendimentos.id))
+        .leftJoin(clientes, eq(atendimentos.clienteId, clientes.id))
         .where(filtros.length ? and(...filtros) : undefined);
 
     const quantidade = totais.quantidade || 0;
@@ -167,6 +169,8 @@ export async function getSalesDetails(options = {}) {
             valor_produtos: Number(venda.valorProdutos) || 0,
             pago_em: venda.pagoEm || null,
             pagamento_confirmado_por: venda.pagamentoConfirmadoPor || null,
+            forma_pagamento: venda.formaPagamento || null,
+            fechada_por: venda.fechadaPor || null,
             cliente_detalhes: {
                 id: cliente?.id || null,
                 nome: nomeCliente,

@@ -85,6 +85,13 @@
       "when": 1791318787600,
       "tag": "0011_chat_lido_em",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791319787600,
+      "tag": "0012_venda_forma_e_quem_fechou",
+      "breakpoints": true
     }
   ]
 }

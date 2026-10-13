@@ -19,6 +19,7 @@ const devolverSchema = z.object({
 const encerrarPorClienteSchema = z.object({
     id_faces: z.array(z.string().min(1).max(64)).min(1).max(6),
     venda: z.object({ valor_total: z.number().positive().max(10_000_000) }).optional(),
+    fechada_por: z.string().min(1).max(120).optional(),
 });
 
 // `desde` é inclusivo e `ate` é exclusivo, sobre a última atividade do atendimento.
@@ -95,10 +96,10 @@ export const atendimentoController = {
         if (!parsed.success) {
             return res.status(400).json({ success: false, error: 'id_faces é obrigatório; venda.valor_total deve ser positivo' });
         }
-        const { id_faces, venda } = parsed.data;
+        const { id_faces, venda, fechada_por: fechadaPor } = parsed.data;
         const resultado = await atendimentoService.encerrarPorCliente(
             id_faces,
-            venda ? { valorTotal: venda.valor_total } : null,
+            venda ? { valorTotal: venda.valor_total, fechadaPor } : null,
         );
         if (!resultado) {
             return res.status(404).json({ success: false, error: 'Nenhum atendimento aberto para esse cliente' });
