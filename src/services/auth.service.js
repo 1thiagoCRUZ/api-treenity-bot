@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq, isNull } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { usuarios, refreshTokens } from '../db/schema.js';
 import { signAccessToken } from '../utils/jwt.util.js';
@@ -34,7 +34,7 @@ export const authService = {
     // — promoção a admin continua sendo uma ação manual dentro deste sistema,
     // nunca decidida por quem chama o SSO (evita escalonamento de privilégio
     // caso o segredo compartilhado vaze ou o outro sistema tenha um bug).
-    async encontrarOuCriarPorEmailSso(email, nome) {
+    async encontrarOuCriarPorEmailSso(email, nome, organizacaoId) {
         const emailNormalizado = email.toLowerCase();
         const [existente] = await db.select().from(usuarios).where(eq(usuarios.email, emailNormalizado)).limit(1);
         if (existente) {
@@ -44,15 +44,22 @@ export const authService = {
             // lista do chat. Quando o outro lado não tem nome próprio ele manda o
             // e-mail no lugar, e isso não pode sobrescrever um nome de verdade.
             const nomeNovo = (nome ?? '').trim().slice(0, 100);
+            const mudancas = {};
             if (nomeNovo && nomeNovo.toLowerCase() !== emailNormalizado && nomeNovo !== existente.nome) {
-                const [atualizado] = await db
-                    .update(usuarios)
-                    .set({ nome: nomeNovo })
-                    .where(eq(usuarios.id, existente.id))
-                    .returning();
-                return atualizado;
+                mudancas.nome = nomeNovo;
             }
-            return existente;
+            // A empresa só muda quando o DeskComm a afirma (o Chat da equipe manda;
+            // as chamadas do painel não mandam e não mexem nela).
+            if (organizacaoId && organizacaoId !== existente.organizacaoId) {
+                mudancas.organizacaoId = organizacaoId;
+            }
+            if (Object.keys(mudancas).length === 0) return existente;
+            const [atualizado] = await db
+                .update(usuarios)
+                .set(mudancas)
+                .where(eq(usuarios.id, existente.id))
+                .returning();
+            return atualizado;
         }
 
         // Conta provisionada via SSO nunca loga com senha por aqui — gera um
@@ -63,7 +70,7 @@ export const authService = {
 
         const [novo] = await db
             .insert(usuarios)
-            .values({ nome, email: emailNormalizado, senhaHash, papel: 'funcionario' })
+            .values({ nome, email: emailNormalizado, senhaHash, papel: 'funcionario', organizacaoId: organizacaoId ?? null })
             .returning();
 
         return novo;
@@ -71,11 +78,24 @@ export const authService = {
 
     // "Diretório" interno — usado pelo frontend pra montar o seletor de "com
     // quem iniciar uma conversa". Só id/nome/papel: nunca email nem senha_hash.
-    async listarUsuarios() {
+    //
+    // Só devolve quem é da MESMA empresa de quem pergunta: sem isso, o chat de
+    // uma empresa listava os funcionários de todas as outras. Quem ainda não tem
+    // empresa registrada (nulo) só enxerga outros sem empresa — nunca a de alguém.
+    async listarUsuarios(solicitanteId) {
+        const [eu] = await db
+            .select({ organizacaoId: usuarios.organizacaoId })
+            .from(usuarios)
+            .where(eq(usuarios.id, solicitanteId))
+            .limit(1);
+        if (!eu) return [];
+        const mesmaEmpresa = eu.organizacaoId
+            ? eq(usuarios.organizacaoId, eu.organizacaoId)
+            : isNull(usuarios.organizacaoId);
         return db
             .select({ id: usuarios.id, nome: usuarios.nome, papel: usuarios.papel })
             .from(usuarios)
-            .where(eq(usuarios.ativo, true))
+            .where(and(eq(usuarios.ativo, true), mesmaEmpresa))
             .orderBy(asc(usuarios.nome));
     },
 

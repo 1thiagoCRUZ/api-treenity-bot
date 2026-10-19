@@ -92,6 +92,13 @@
       "when": 1791319787600,
       "tag": "0012_venda_forma_e_quem_fechou",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1791320787600,
+      "tag": "0013_usuarios_organizacao",
+      "breakpoints": true
     }
   ]
 }
