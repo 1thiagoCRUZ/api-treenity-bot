@@ -17,6 +17,22 @@ function montarPrevia(conteudoCriptografado) {
 }
 
 export const chatService = {
+    // Duas pessoas só conversam se são da mesma empresa (nulo só combina com nulo,
+    // e nenhum lado pode estar desativado). Chamada em todo ponto que ABRE ou
+    // ENTRA numa conversa — a barreira fica aqui na API porque o navegador fala
+    // direto com ela.
+    async mesmaEmpresa(idA, idB) {
+        if (!UUID_REGEX.test(idA) || !UUID_REGEX.test(idB)) return false;
+        const linhas = await db
+            .select({ id: usuarios.id, organizacaoId: usuarios.organizacaoId })
+            .from(usuarios)
+            .where(and(inArray(usuarios.id, [idA, idB]), eq(usuarios.ativo, true)));
+        const a = linhas.find((u) => u.id === idA);
+        const b = linhas.find((u) => u.id === idB);
+        if (!a || !b) return false;
+        return (a.organizacaoId ?? null) === (b.organizacaoId ?? null);
+    },
+
     // Conversas de que o usuário participa, da mais recente pra mais antiga, cada
     // uma com o outro participante e a última mensagem (prévia já descriptografada).
     // Ficam de fora conversas cujo outro lado não existe mais ou foi desativado
@@ -37,11 +53,23 @@ export const chatService = {
 
         const outros = outrosIds.length
             ? await db
-                  .select({ id: usuarios.id, nome: usuarios.nome, papel: usuarios.papel })
+                  .select({ id: usuarios.id, nome: usuarios.nome, papel: usuarios.papel, organizacaoId: usuarios.organizacaoId })
                   .from(usuarios)
                   .where(and(inArray(usuarios.id, outrosIds), eq(usuarios.ativo, true)))
             : [];
-        const outroPorId = new Map(outros.map((u) => [u.id, u]));
+        // Conversa com gente de OUTRA empresa (herança de antes da separação)
+        // fica escondida: não há mais como abri-la nem continuá-la.
+        const [eu] = await db
+            .select({ organizacaoId: usuarios.organizacaoId })
+            .from(usuarios)
+            .where(eq(usuarios.id, usuarioId))
+            .limit(1);
+        const minhaEmpresa = eu?.organizacaoId ?? null;
+        const outroPorId = new Map(
+            outros
+                .filter((u) => (u.organizacaoId ?? null) === minhaEmpresa)
+                .map(({ organizacaoId, ...publico }) => [publico.id, publico]),
+        );
 
         const ultimas = await db
             .selectDistinctOn([chatMensagens.conversaId], {
@@ -108,7 +136,10 @@ export const chatService = {
     // Total de mensagens não lidas do usuário, somando todas as conversas. É o
     // número do selo do "Chat da equipe" no menu do DeskComm.
     async totalNaoLidas(usuarioId) {
-        const porConversa = await this.contarNaoLidas(usuarioId);
+        // Só conta as conversas que a lista mostra: o selo não pode acender por
+        // uma conversa escondida de outra empresa.
+        const visiveis = await this.listarConversasDoUsuario(usuarioId);
+        const porConversa = await this.contarNaoLidas(usuarioId, visiveis.map((c) => c.id));
         let total = 0;
         for (const n of porConversa.values()) total += n;
         return total;

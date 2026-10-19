@@ -31,6 +31,8 @@ export const usuarios = pgTable('usuarios', {
     senhaHash: text('senha_hash').notNull(),
     papel: papelUsuarioEnum('papel').notNull(),
     ativo: boolean('ativo').notNull().default(true),
+    // Empresa (organização do DeskComm). Ver drizzle/0013 e chat.service.js.
+    organizacaoId: text('organizacao_id'),
     criadoEm: timestamp('criado_em', { withTimezone: true }).notNull().defaultNow(),
     atualizadoEm: timestamp('atualizado_em', { withTimezone: true }).notNull().defaultNow(),
 });

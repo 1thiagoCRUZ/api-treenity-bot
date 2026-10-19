@@ -70,6 +70,11 @@ O problema que isso cria: o funcionário já fez login **no outro sistema** (lá
      "funcionario". Sem o campo (ou `false`), sem a claim. A claim vive só no
      accessToken de 15 min: some numa renovação por refresh e precisa ser
      reafirmada por um novo SSO
+   - se o corpo trouxer `organizacao_id` (a empresa da pessoa no sistema de
+     origem), ela é gravada no usuário. O Chat da equipe só lista e só deixa
+     conversar quem tem a MESMA empresa (`GET /api/auth/usuarios`, `POST
+     /api/chat/init`, `join_chat` e o histórico conferem). Chamadas sem o campo
+     não alteram a empresa; usuário sem empresa só enxerga quem também não tem.
    - se o usuário já existe e o `nome` recebido é diferente do gravado, atualiza
      o nome (quem renomeia o perfil no deskcomm aparece com o nome novo na lista
      do chat). Um `nome` vazio ou igual ao e-mail — o que o outro lado manda

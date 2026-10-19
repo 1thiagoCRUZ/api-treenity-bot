@@ -34,6 +34,8 @@ const ssoSchema = z.object({
     // ganha só a claim `painelAdmin` (leitura de vendas/atendimentos), nunca o
     // papel 'admin' deste sistema — ver requirePainelAdmin.
     painel_admin: z.boolean().optional(),
+    // Empresa da pessoa no DeskComm. O Chat da equipe só mistura gente da mesma.
+    organizacao_id: z.string().min(1).max(100).optional(),
 });
 
 export const authController = {
@@ -96,7 +98,7 @@ export const authController = {
     // Lista os usuários ativos (id/nome/papel) — qualquer autenticado pode
     // chamar, é o "diretório" pra escolher com quem iniciar uma conversa.
     async listarUsuarios(req, res) {
-        const usuarios = await authService.listarUsuarios();
+        const usuarios = await authService.listarUsuarios(req.usuario.id);
         res.json({ success: true, data: usuarios });
     },
 
@@ -112,9 +114,9 @@ export const authController = {
         if (!parsed.success) {
             return res.status(400).json({ success: false, error: 'email e nome são obrigatórios' });
         }
-        const { email, nome, painel_admin } = parsed.data;
+        const { email, nome, painel_admin, organizacao_id } = parsed.data;
 
-        const usuario = await authService.encontrarOuCriarPorEmailSso(email, nome);
+        const usuario = await authService.encontrarOuCriarPorEmailSso(email, nome, organizacao_id);
         const { accessToken, refreshToken, refreshExpiraEm } = await authService.emitirTokens(
             usuario,
             req.headers['user-agent'],

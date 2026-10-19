@@ -53,6 +53,10 @@ export const chatController = {
             return res.status(403).json({ success: false, error: 'Você só pode iniciar conversas das quais participa' });
         }
 
+        if (!(await chatService.mesmaEmpresa(adminId, funcionarioId))) {
+            return res.status(403).json({ success: false, error: 'Você só pode conversar com a equipe da sua empresa' });
+        }
+
         const conversa = await chatService.getOrCreateChat(adminId, funcionarioId);
         res.json({ success: true, data: conversa });
     },
@@ -71,6 +75,10 @@ export const chatController = {
         }
 
         if (![conversa.adminId, conversa.funcionarioId].includes(req.usuario.id)) {
+            return res.status(403).json({ success: false, error: 'Você não tem acesso a esta conversa' });
+        }
+
+        if (!(await chatService.mesmaEmpresa(conversa.adminId, conversa.funcionarioId))) {
             return res.status(403).json({ success: false, error: 'Você não tem acesso a esta conversa' });
         }
 

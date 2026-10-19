@@ -53,6 +53,9 @@ export default function configureChatSockets(io) {
                     if (![adminId, funcionarioId].includes(socket.usuario.id)) {
                         return socket.emit('chat_error', { error: 'Você só pode entrar em conversas das quais participa.' });
                     }
+                    if (!(await chatService.mesmaEmpresa(adminId, funcionarioId))) {
+                        return socket.emit('chat_error', { error: 'Você só pode conversar com a equipe da sua empresa.' });
+                    }
                     conversa = await chatService.getOrCreateChat(adminId, funcionarioId);
                     roomId = conversa.id;
                 } else if (roomId) {
@@ -67,6 +70,9 @@ export default function configureChatSockets(io) {
                 const ehParticipante = [conversa.adminId, conversa.funcionarioId].includes(socket.usuario.id);
                 if (!ehParticipante) {
                     return socket.emit('chat_error', { error: 'Você não faz parte desta conversa.' });
+                }
+                if (!(await chatService.mesmaEmpresa(conversa.adminId, conversa.funcionarioId))) {
+                    return socket.emit('chat_error', { error: 'Você só pode conversar com a equipe da sua empresa.' });
                 }
 
                 socket.join(roomId);
