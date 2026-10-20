@@ -115,6 +115,9 @@ export const clientes = pgTable(
     },
     (table) => [
         index('idx_clientes_conta').on(table.contaId),
+        // Busca por texto (ilike '%termo%') nas listas do painel — ver pg_trgm na migration 0015.
+        index('idx_clientes_nome_trgm').using('gin', table.nome.op('gin_trgm_ops')),
+        index('idx_clientes_id_face_trgm').using('gin', table.idFace.op('gin_trgm_ops')),
         unique('clientes_id_face_key').on(table.idFace),
     ]
 );
@@ -159,7 +162,11 @@ export const mensagens = pgTable(
     },
     // Transcrição de um atendimento, "última mensagem" e contagem por atendimento
     // (lista do painel): sem isso cada uma varreria a tabela inteira.
-    (table) => [index('idx_mensagens_atendimento').on(table.atendimentoId, table.enviadoEm)]
+    (table) => [
+        index('idx_mensagens_atendimento').on(table.atendimentoId, table.enviadoEm),
+        // Busca por texto na conversa (ilike '%termo%') — ver pg_trgm na migration 0015.
+        index('idx_mensagens_conteudo_trgm').using('gin', table.conteudo.op('gin_trgm_ops')),
+    ]
 );
 
 export const vendas = pgTable(
@@ -188,6 +195,8 @@ export const vendas = pgTable(
         index('idx_vendas_atendimento').on(table.atendimentoId),
         // Paginação por cursor da lista de vendas (mais recentes primeiro).
         index('idx_vendas_criado').on(table.criadoEm, table.id),
+        // Busca por texto nos itens do pedido (ilike '%termo%') — ver pg_trgm na migration 0015.
+        index('idx_vendas_itens_trgm').using('gin', table.itensPedido.op('gin_trgm_ops')),
     ]
 );
 

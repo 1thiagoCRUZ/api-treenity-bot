@@ -1,7 +1,8 @@
-import { and, asc, count, desc, eq, exists, gte, inArray, lt, ne, notExists, or, sql, sum } from 'drizzle-orm';
+import { and, asc, count, desc, eq, exists, gte, ilike, inArray, lt, ne, notExists, or, sql, sum } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { atendimentos, clientes, mensagens, vendas } from '../db/schema.js';
 import { codificarCursor } from '../utils/cursor.util.js';
+import { condicaoCliente, extrairTrecho, normalizarBusca, padraoContem } from '../utils/busca.util.js';
 import { STATUS_AGUARDANDO } from './venda.service.js';
 
 const LISTA_LIMITE_PADRAO = 30;
@@ -19,7 +20,8 @@ export const atendimentoService = {
     // nota da IA, se teve venda e a última mensagem. Paginada por cursor.
     //
     // options: { limit, canal, etapa, comVenda (bool), desde (Date, inclusivo),
-    //            ate (Date, exclusivo), cursor ({ t, id } — ver cursor.util.js) }
+    //            ate (Date, exclusivo), busca (texto: nome do cliente, id_face/telefone ou
+    //            qualquer mensagem do atendimento), cursor ({ t, id } — ver cursor.util.js) }
     // Devolve { itens, proximoCursor }.
     async listarTodos(options = {}) {
         const limit = Math.min(Math.max(Number(options.limit) || LISTA_LIMITE_PADRAO, 1), LISTA_LIMITE_MAXIMO);
@@ -29,6 +31,14 @@ export const atendimentoService = {
         if (options.etapa) condicoes.push(eq(atendimentos.statusFunil, options.etapa));
         if (options.desde) condicoes.push(gte(atividadeEm, options.desde));
         if (options.ate) condicoes.push(lt(atividadeEm, options.ate));
+        const busca = normalizarBusca(options.busca);
+        if (busca) {
+            const temMensagem = db
+                .select({ um: sql`1` })
+                .from(mensagens)
+                .where(and(eq(mensagens.atendimentoId, atendimentos.id), ilike(mensagens.conteudo, padraoContem(busca))));
+            condicoes.push(or(condicaoCliente(busca, clientes.nome, clientes.idFace), exists(temMensagem)));
+        }
         if (options.comVenda !== undefined) {
             const temVenda = db
                 .select({ um: sql`1` })
@@ -69,7 +79,7 @@ export const atendimentoService = {
 
         // Enriquecimento só da página: última mensagem, total de mensagens e vendas.
         const ids = linhas.map((l) => l.atendimento.id);
-        const [ultimas, totais, vendasPorAtendimento] = await Promise.all([
+        const [ultimas, totais, vendasPorAtendimento, casadas] = await Promise.all([
             db
                 .selectDistinctOn([mensagens.atendimentoId], {
                     atendimentoId: mensagens.atendimentoId,
@@ -91,7 +101,19 @@ export const atendimentoService = {
                 .from(vendas)
                 .where(inArray(vendas.atendimentoId, ids))
                 .groupBy(vendas.atendimentoId),
+            // Com busca: a mensagem mais recente de cada atendimento que contém o termo.
+            busca
+                ? db
+                      .selectDistinctOn([mensagens.atendimentoId], {
+                          atendimentoId: mensagens.atendimentoId,
+                          conteudo: mensagens.conteudo,
+                      })
+                      .from(mensagens)
+                      .where(and(inArray(mensagens.atendimentoId, ids), ilike(mensagens.conteudo, padraoContem(busca))))
+                      .orderBy(mensagens.atendimentoId, desc(mensagens.enviadoEm))
+                : Promise.resolve([]),
         ]);
+        const trechoPorAtendimento = new Map(casadas.map((m) => [m.atendimentoId, extrairTrecho(m.conteudo, busca)]));
         const ultimaPorAtendimento = new Map(ultimas.map((m) => [m.atendimentoId, m]));
         const totalPorAtendimento = new Map(totais.map((t) => [t.atendimentoId, t.total]));
         const vendaPorAtendimento = new Map(vendasPorAtendimento.map((v) => [v.atendimentoId, v]));
@@ -124,6 +146,8 @@ export const atendimentoService = {
                       }
                     : null,
                 venda: venda ? { quantidade: venda.quantidade, total: Number(venda.total) || 0 } : null,
+                // Só quando há busca: pedaço da mensagem que casou (null se casou só por nome/telefone).
+                ...(busca ? { trecho: trechoPorAtendimento.get(a.id) ?? null } : {}),
             };
         });
 

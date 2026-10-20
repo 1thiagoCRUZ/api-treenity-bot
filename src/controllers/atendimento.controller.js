@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { atendimentoService } from '../services/atendimento.service.js';
 import { deskcommService } from '../services/deskcomm.service.js';
 import { emitAlertaAtendimento } from '../sockets/realtime.js';
+import { buscaSchema } from '../utils/busca.util.js';
 import { decodificarCursor } from '../utils/cursor.util.js';
 
 const sinalizarSchema = z.object({
@@ -27,6 +28,7 @@ const listarSchema = z.object({
     canal: z.string().min(1).max(60).optional(),
     etapa: z.string().min(1).max(60).optional(),
     com_venda: z.enum(['true', 'false']).optional(),
+    busca: buscaSchema,
     desde: z.coerce.date().optional(),
     ate: z.coerce.date().optional(),
     cursor: z.string().max(300).optional(),
