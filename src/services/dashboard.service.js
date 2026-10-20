@@ -112,7 +112,8 @@ export async function getSalesDetails(options = {}) {
         );
     }
 
-    const linhasComUma = await db
+    // Lista e resumo não dependem um do outro: rodam juntos (cada um numa conexão do pool).
+    const listaPromise = db
         .select({
             venda: vendas,
             atendimento: atendimentos,
@@ -126,12 +127,7 @@ export async function getSalesDetails(options = {}) {
         .orderBy(desc(vendas.criadoEm), desc(vendas.id))
         .limit(limit + 1); // uma a mais só pra saber se existe próxima página
 
-    const temProxima = linhasComUma.length > limit;
-    const linhas = temProxima ? linhasComUma.slice(0, limit) : linhasComUma;
-    const ultima = linhas[linhas.length - 1];
-    const proximoCursor = temProxima ? codificarCursor(ultima.cursorTs, ultima.venda.id) : null;
-
-    const [totais] = await db
+    const totaisPromise = db
         .select({
             quantidade: count(),
             faturamento: sum(vendas.valorTotal),
@@ -142,6 +138,13 @@ export async function getSalesDetails(options = {}) {
         .leftJoin(atendimentos, eq(vendas.atendimentoId, atendimentos.id))
         .leftJoin(clientes, eq(atendimentos.clienteId, clientes.id))
         .where(filtros.length ? and(...filtros) : undefined);
+
+    const [linhasComUma, [totais]] = await Promise.all([listaPromise, totaisPromise]);
+
+    const temProxima = linhasComUma.length > limit;
+    const linhas = temProxima ? linhasComUma.slice(0, limit) : linhasComUma;
+    const ultima = linhas[linhas.length - 1];
+    const proximoCursor = temProxima ? codificarCursor(ultima.cursorTs, ultima.venda.id) : null;
 
     const quantidade = totais.quantidade || 0;
     const resumo = {
