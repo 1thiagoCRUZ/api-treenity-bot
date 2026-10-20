@@ -61,6 +61,12 @@ const porta = process.env.PORT || 3000;
 // client via CDN, e o CSP padrão do helmet bloquearia esse <script src>. O
 // resto dos headers de segurança (X-Content-Type-Options, HSTS, etc.) valem.
 app.use(helmet({ contentSecurityPolicy: false }));
+
+// Health check barato: sem autenticação, sem banco, sem dados. Fica antes do
+// rate limiter para pings de monitoramento (manter o Render acordado / medir
+// cold start) não consumirem a cota de requisições dos usuários.
+app.get('/health', (_req, res) => res.json({ ok: true }));
+
 app.use(cors({ origin: checkOrigin, credentials: true }));
 app.use(apiLimiter);
 app.use(express.json());
@@ -80,6 +86,7 @@ server.listen(porta, () => {
     console.log(`======================================================`);
     console.log(`Server is running on port ${porta}`);
     console.log(`Available endpoints:`);
+    console.log(`   - GET  http://localhost:${porta}/health`);
     console.log(`   - POST http://localhost:${porta}/api/auth/login`);
     console.log(`   - POST http://localhost:${porta}/api/auth/refresh`);
     console.log(`   - POST http://localhost:${porta}/api/auth/logout`);
