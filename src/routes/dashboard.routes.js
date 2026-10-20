@@ -10,10 +10,11 @@ const router = express.Router();
 // não exigir Bearer token. Mesma ação de POST /atualizar, autenticação diferente.
 router.post('/atualizar-agendado', requireCronSecret, dashboardController.forceUpdate);
 
-// Métricas agregadas: qualquer usuário autenticado (admin ou funcionário) pode ler.
 router.use(requireAuth);
 
-router.get('/', dashboardController.getDashboard);
+// Métricas agregadas (faturamento): só admin do painel (claim `painelAdmin`) ou
+// admin deste sistema — Funcionário não lê.
+router.get('/', requirePainelAdmin, dashboardController.getDashboard);
 
 // Vendas trazem nome, CEP e itens do cliente: só o painel admin (claim
 // `painelAdmin` do SSO) ou um admin deste sistema.

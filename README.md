@@ -105,6 +105,26 @@ O `accessToken` dura só 15 minutos (igual o de um login normal). Como isso é u
 - Contas criadas via SSO entram sempre como `funcionario`; virar `admin` é uma ação separada, feita por um admin já existente via `POST /api/auth/usuarios` — o SSO nunca decide isso sozinho.
 - Configure `SSO_SHARED_SECRET` no `.env` (veja `.env.example`) e combine o mesmo valor do lado do deskcomm.
 
+## Quem pode chamar o quê
+
+Rotas sensíveis e o que cada uma exige (testado em `tests/rotas-sensiveis.test.mjs`, rode `node --test tests/rotas-sensiveis.test.mjs`):
+
+| Rota | Quem chama | O que exige |
+|---|---|---|
+| `GET /api/dashboard` (faturamento) | painel | Bearer com `painelAdmin` (ou admin do bot) |
+| `GET /api/dashboard/vendas` | painel | Bearer com `painelAdmin` (ou admin do bot) |
+| `GET /api/atendimentos` | painel | Bearer com `painelAdmin` (ou admin do bot) |
+| `GET /api/atendimentos/sinalizados` | painel | Bearer com `painelAdmin` (ou admin do bot) |
+| `GET /api/atendimentos/:id/mensagens` | painel | Bearer com `painelAdmin` (ou admin do bot) |
+| `POST /api/atendimentos/encerrar-por-cliente` | backend do painel | só `X-SSO-Secret` (token de usuário não vale) |
+| `POST /api/atendimentos/devolver-ao-bot` | backend do painel | só `X-SSO-Secret` |
+| `POST /api/atendimentos/:id/encerrar` | backend do painel | só `X-SSO-Secret` |
+| `POST /api/atendimentos/sinalizar` | n8n | só `X-N8N-Secret` |
+| `/api/vendas/*`, `/api/respostas-rapidas/*`, `POST /api/auth/sso` | backend do painel | só `X-SSO-Secret` |
+| `POST /api/dashboard/atualizar-agendado` | agendador | só segredo de cron |
+
+O token do `POST /api/auth/sso` sai SEMPRE com papel `funcionario`, mesmo que o e-mail coincida com uma conta `admin` local; papel `admin` do bot só existe no login por senha (e é ele que abre `POST /api/auth/usuarios` e `POST /api/dashboard/atualizar`). A claim `painelAdmin` só é emitida pelo SSO quando o painel afirma que a pessoa é admin da empresa; Funcionário recebe 403 nas leituras. A API roda atrás de 1 proxy (Render): `app.set('trust proxy', 1)` faz o rate limit usar o IP real do visitante.
+
 ## Painel admin — lista de atendimentos
 
 - `GET /api/atendimentos` → todos os atendimentos (cliente ↔ IA), do mais ativo pro menos, com o resumo de cada um numa linha. Restrito ao **painel admin** (claim `painelAdmin` do SSO, ou admin deste sistema; senão `403`).

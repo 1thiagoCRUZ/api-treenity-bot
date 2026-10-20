@@ -3,6 +3,7 @@ import { atendimentoController } from '../controllers/atendimento.controller.js'
 import { asyncHandler } from '../middlewares/asyncHandler.js';
 import { requireAuth, requirePainelAdmin } from '../middlewares/auth.middleware.js';
 import { requireN8nSecret } from '../middlewares/n8n.middleware.js';
+import { requireSsoSecret } from '../middlewares/sso.middleware.js';
 
 const router = Router();
 
@@ -13,20 +14,25 @@ router.get('/', requireAuth, requirePainelAdmin, asyncHandler(atendimentoControl
 // Chamada pelo n8n (server-to-server), não por usuário logado.
 router.post('/sinalizar', requireN8nSecret, asyncHandler(atendimentoController.sinalizar));
 
-// Chamada pelo DeskComm ("Reativar bot" no Inbox), com o token SSO do usuário
-// que clicou. Precisa vir ANTES de `/:id/...` só por clareza — o caminho não colide.
-router.post('/devolver-ao-bot', requireAuth, asyncHandler(atendimentoController.devolverAoBot));
+// Mutações chamadas SÓ pelo backend do DeskComm (server-to-server). Exigem o
+// segredo de servidor (X-SSO-Secret) e NÃO aceitam token de usuário: o Bearer
+// de uma pessoa (inclusive Funcionário) não basta para religar o bot, encerrar
+// atendimento nem criar/alterar venda. A decisão de "quem pode" já foi tomada
+// no servidor do DeskComm antes da chamada. O n8n não chama nenhuma delas
+// (só /sinalizar, acima).
 
-// Chamada pelo DeskComm quando a equipe fecha a conversa no Inbox dizendo como
-// terminou (com ou sem venda). Token SSO do usuário que clicou.
-router.post('/encerrar-por-cliente', requireAuth, asyncHandler(atendimentoController.encerrarPorCliente));
+// "Reativar bot" no Inbox.
+router.post('/devolver-ao-bot', requireSsoSecret, asyncHandler(atendimentoController.devolverAoBot));
 
-// Chamada pelo painel — qualquer usuário autenticado pode encerrar um
-// atendimento que assumiu manualmente.
-router.post('/:id/encerrar', requireAuth, asyncHandler(atendimentoController.encerrar));
+// Equipe fecha a conversa no Inbox dizendo como terminou (com ou sem venda).
+router.post('/encerrar-por-cliente', requireSsoSecret, asyncHandler(atendimentoController.encerrarPorCliente));
 
-// Leitura, pro painel (fallback caso o deskcomm não tenha isso pronto):
-router.get('/sinalizados', requireAuth, asyncHandler(atendimentoController.listarSinalizados));
-router.get('/:id/mensagens', requireAuth, asyncHandler(atendimentoController.listarMensagens));
+// Encerrar um atendimento assumido manualmente (botão na transcrição do painel).
+router.post('/:id/encerrar', requireSsoSecret, asyncHandler(atendimentoController.encerrar));
+
+// Leituras sensíveis (nome/telefone de cliente, conversa inteira): só admin do
+// painel (claim `painelAdmin`) ou admin deste sistema.
+router.get('/sinalizados', requireAuth, requirePainelAdmin, asyncHandler(atendimentoController.listarSinalizados));
+router.get('/:id/mensagens', requireAuth, requirePainelAdmin, asyncHandler(atendimentoController.listarMensagens));
 
 export default router;
