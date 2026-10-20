@@ -117,8 +117,12 @@ export const authController = {
         const { email, nome, painel_admin, organizacao_id } = parsed.data;
 
         const usuario = await authService.encontrarOuCriarPorEmailSso(email, nome, organizacao_id);
+        // O token do SSO sai SEMPRE com papel 'funcionario', mesmo que o e-mail
+        // coincida com uma conta 'admin' local deste sistema: quem chama o SSO
+        // afirma só a identidade e, via `painel_admin`, a permissão de painel.
+        // Papel 'admin' do bot vale apenas no login por senha.
         const { accessToken, refreshToken, refreshExpiraEm } = await authService.emitirTokens(
-            usuario,
+            { ...usuario, papel: 'funcionario' },
             req.headers['user-agent'],
             painel_admin === true ? { painelAdmin: true } : {}
         );

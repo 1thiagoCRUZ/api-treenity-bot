@@ -26,6 +26,11 @@ import { iniciarPainelListener } from './realtime/painel-listener.js';
 import { apiLimiter } from './middlewares/rate-limit.middleware.js';
 
 const app = express();
+
+// O Render põe 1 proxy na frente da API. Sem isto, req.ip é o IP do proxy e o
+// rate limit (loginLimiter/apiLimiter) vira um balde único para todo mundo;
+// com 1, o Express lê o IP real do cliente no X-Forwarded-For.
+app.set('trust proxy', 1);
 const server = http.createServer(app);
 
 // Origens do frontend/demo que podem chamar a API com cookies (refresh token).
