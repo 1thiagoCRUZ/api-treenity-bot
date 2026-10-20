@@ -47,3 +47,13 @@ test('extrairTrecho: pedaço de ~120 caracteres com o termo dentro', () => {
 test('condicaoCliente monta a condição sem tocar o banco', () => {
     assert.ok(condicaoCliente('maria', { name: 'nome' }, { name: 'id_face' }));
 });
+
+test('listarSchema: em_andamento aceita true/false e rejeita o resto', async () => {
+    process.env.DATABASE_URL ??= 'postgresql://u:p@127.0.0.1:1/dummy';
+    process.env.JWT_ACCESS_SECRET ??= 'teste';
+    process.env.ENCRYPTION_KEY ??= 'teste';
+    const { listarSchema } = await import('../src/controllers/atendimento.controller.js');
+    assert.equal(listarSchema.parse({}).em_andamento, undefined);
+    assert.equal(listarSchema.parse({ em_andamento: 'true' }).em_andamento, 'true');
+    assert.equal(listarSchema.safeParse({ em_andamento: 'talvez' }).success, false);
+});

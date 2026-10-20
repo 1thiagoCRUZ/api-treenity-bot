@@ -14,12 +14,15 @@ const PREVIA_MAX_CARACTERES = 140;
 // null) quebre a ordenação e o cursor.
 const atividadeEm = sql`coalesce(${atendimentos.atualizadoEm}, ${atendimentos.criadoEm}, 'epoch'::timestamptz)`;
 
+// Etapas que encerram o atendimento; qualquer outra (ou nula) é "em andamento".
+export const ETAPAS_ENCERRADAS = ['Fechada', 'Perdida'];
+
 export const atendimentoService = {
     // Lista TODOS os atendimentos (a IA e o cliente), do mais ativo pro menos,
     // com o que um painel precisa numa linha: cliente, canal, etapa do funil,
     // nota da IA, se teve venda e a última mensagem. Paginada por cursor.
     //
-    // options: { limit, canal, etapa, comVenda (bool), desde (Date, inclusivo),
+    // options: { limit, canal, etapa, emAndamento (true = fora Fechada/Perdida; nulo conta), comVenda (bool), desde (Date, inclusivo),
     //            ate (Date, exclusivo), busca (texto: nome do cliente, id_face/telefone ou
     //            qualquer mensagem do atendimento), cursor ({ t, id } — ver cursor.util.js) }
     // Devolve { itens, proximoCursor }.
@@ -29,6 +32,9 @@ export const atendimentoService = {
         const condicoes = [];
         if (options.canal) condicoes.push(eq(atendimentos.canal, options.canal));
         if (options.etapa) condicoes.push(eq(atendimentos.statusFunil, options.etapa));
+        if (options.emAndamento) {
+            condicoes.push(sql`coalesce(${atendimentos.statusFunil}, '') not in (${sql.join(ETAPAS_ENCERRADAS.map((e) => sql`${e}`), sql`, `)})`);
+        }
         if (options.desde) condicoes.push(gte(atividadeEm, options.desde));
         if (options.ate) condicoes.push(lt(atividadeEm, options.ate));
         const busca = normalizarBusca(options.busca);
