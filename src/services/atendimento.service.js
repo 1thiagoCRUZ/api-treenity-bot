@@ -221,12 +221,12 @@ export const atendimentoService = {
             .innerJoin(clientes, eq(atendimentos.clienteId, clientes.id))
             .where(and(
                 eq(clientes.idFace, idFace),
-                ne(atendimentos.statusFunil, 'Fechada'),
+                sql`coalesce(${atendimentos.statusFunil}, '') <> 'Fechada'`,
                 // Com conta_id, só o cliente DESSA empresa; sem ele, o comportamento antigo.
-                // A empresa do atendimento manda (id_face é único em clientes, então o
-                // mesmo número pode ter atendimentos de empresas diferentes); linha
-                // legada sem conta no atendimento cai para a conta do cliente.
-                contaId ? sql`coalesce(${atendimentos.contaId}, ${clientes.contaId}) = ${contaId}` : undefined,
+                // A conta do atendimento manda; se for nula, vale a do cliente; se as duas
+                // forem nulas (linha LEGADA), casa. Limitação conhecida: clientes.id_face é
+                // único, então um número = um cliente = uma empresa.
+                contaId ? sql`coalesce(${atendimentos.contaId}, ${clientes.contaId}, ${contaId}) = ${contaId}` : undefined,
             ))
             .orderBy(desc(atendimentos.criadoEm))
             .limit(1);

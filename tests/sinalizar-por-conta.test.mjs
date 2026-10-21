@@ -69,12 +69,15 @@ test.before(async () => {
         ('00000000-0000-0000-0000-0000000000a1','5511aaa','Ana','conta-A'),
         ('00000000-0000-0000-0000-0000000000b1','5511bbb','Bia','conta-B'),
         ('00000000-0000-0000-0000-0000000000c1','5511ccc','Caio','conta-A'),
-        ('00000000-0000-0000-0000-0000000000d1','5511ddd','Duda',null)`);
-    // Caio: cliente gravado na conta-A, mas o atendimento aberto é da conta-B (mesmo número, duas empresas).
+        ('00000000-0000-0000-0000-0000000000d1','5511ddd','Duda',null),
+        ('00000000-0000-0000-0000-0000000000e1','5511eee','Edu',null)`);
+    // Caio: cliente gravado na conta-A, mas o atendimento aberto é da conta-B (conta do atendimento diferente da do cliente).
     // Duda: linha legada, sem conta em lugar nenhum do atendimento; cliente sem conta.
     await db.execute(sql`insert into atendimentos (cliente_id, conta_id) values
         ('00000000-0000-0000-0000-0000000000a1','conta-A'),('00000000-0000-0000-0000-0000000000b1','conta-B'),
         ('00000000-0000-0000-0000-0000000000c1','conta-B'),('00000000-0000-0000-0000-0000000000d1',null)`);
+    // Edu: legado com status_funil NULL (aberto), sem conta.
+    await db.execute(sql`insert into atendimentos (cliente_id, status_funil) values ('00000000-0000-0000-0000-0000000000e1', null)`);
 });
 const marcados = async () =>
     (await db.execute(sql`select c.id_face from atendimentos a join clientes c on c.id=a.cliente_id
@@ -98,7 +101,7 @@ test('com conta_id de OUTRA empresa: 404 e nada é marcado', comBanco, async () 
     assert.deepEqual(await marcados(), []);
 });
 
-test('mesmo número em duas empresas: vale a conta do ATENDIMENTO, não a do cliente', comBanco, async () => {
+test('conta do ATENDIMENTO diferente da do cliente: vale a do atendimento', comBanco, async () => {
     await limpar();
     assert.equal((await chamar({ id_face: '5511ccc', motivo: 'x', conta_id: 'conta-A' })).status, 404);
     assert.deepEqual(await marcados(), []);
@@ -106,10 +109,16 @@ test('mesmo número em duas empresas: vale a conta do ATENDIMENTO, não a do cli
     assert.deepEqual(await marcados(), ['5511ccc']);
 });
 
-test('atendimento sem conta e cliente sem conta: não casa com nenhuma conta', comBanco, async () => {
+test('atendimento sem conta e cliente sem conta (legado): casa com qualquer conta enviada', comBanco, async () => {
     await limpar();
-    assert.equal((await chamar({ id_face: '5511ddd', motivo: 'x', conta_id: 'conta-A' })).status, 404);
-    assert.deepEqual(await marcados(), []);
+    assert.equal((await chamar({ id_face: '5511ddd', motivo: 'x', conta_id: 'conta-A' })).status, 200);
+    assert.deepEqual(await marcados(), ['5511ddd']);
+});
+
+test('status_funil NULL conta como aberto', comBanco, async () => {
+    await limpar();
+    assert.equal((await chamar({ id_face: '5511eee', motivo: 'x', conta_id: 'conta-A' })).status, 200);
+    assert.deepEqual(await marcados(), ['5511eee']);
 });
 
 test('sem conta_id: comportamento antigo (marca em qualquer conta)', comBanco, async () => {
