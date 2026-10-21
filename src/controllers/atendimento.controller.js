@@ -8,6 +8,9 @@ import { decodificarCursor } from '../utils/cursor.util.js';
 const sinalizarSchema = z.object({
     id_face: z.string().min(1),
     motivo: z.string().min(1).max(500),
+    // Empresa (waba_id) dona da conversa. Opcional por compatibilidade com o n8n
+    // antigo; quando vem, a sinalização só alcança clientes dessa conta.
+    conta_id: z.string().min(1).optional(),
 });
 
 // O número pode estar gravado com e sem o nono dígito — o DeskComm manda as
@@ -70,9 +73,9 @@ export const atendimentoController = {
         if (!parsed.success) {
             return res.status(400).json({ success: false, error: 'id_face e motivo são obrigatórios' });
         }
-        const { id_face, motivo } = parsed.data;
+        const { id_face, motivo, conta_id } = parsed.data;
 
-        const atendimento = await atendimentoService.sinalizar(id_face, motivo);
+        const atendimento = await atendimentoService.sinalizar(id_face, motivo, conta_id);
         if (!atendimento) {
             return res.status(404).json({ success: false, error: 'Nenhum atendimento aberto para esse cliente' });
         }

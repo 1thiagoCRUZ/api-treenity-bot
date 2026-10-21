@@ -214,12 +214,17 @@ export const atendimentoService = {
     // Sinaliza o atendimento ABERTO (status_funil != 'Fechada') do cliente
     // identificado por id_face — é sempre no máximo um, pela mesma regra que
     // o bot já usa para não abrir dois atendimentos simultâneos pro mesmo cliente.
-    async sinalizar(idFace, motivo) {
+    async sinalizar(idFace, motivo, contaId) {
         const [linha] = await db
             .select({ atendimento: atendimentos, clienteNome: clientes.nome })
             .from(atendimentos)
             .innerJoin(clientes, eq(atendimentos.clienteId, clientes.id))
-            .where(and(eq(clientes.idFace, idFace), ne(atendimentos.statusFunil, 'Fechada')))
+            .where(and(
+                eq(clientes.idFace, idFace),
+                ne(atendimentos.statusFunil, 'Fechada'),
+                // Com conta_id, só o cliente DESSA empresa; sem ele, o comportamento antigo.
+                contaId ? eq(clientes.contaId, contaId) : undefined,
+            ))
             .orderBy(desc(atendimentos.criadoEm))
             .limit(1);
 
