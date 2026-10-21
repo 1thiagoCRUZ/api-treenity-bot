@@ -1,7 +1,8 @@
-import { and, count, desc, eq, gte, lt, or, sql, sum } from 'drizzle-orm';
+import { and, count, desc, eq, gte, ilike, lt, or, sql, sum } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { clientes, atendimentos, vendas, dashboardMetricsDiarias } from '../db/schema.js';
 import { codificarCursor } from '../utils/cursor.util.js';
+import { condicaoCliente, normalizarBusca, padraoContem } from '../utils/busca.util.js';
 
 async function countTotalCustomers() {
     const [{ total }] = await db.select({ total: count() }).from(clientes);
@@ -83,6 +84,7 @@ const arredondar = (valor) => Number((Number(valor) || 0).toFixed(2));
 // Lista paginada de vendas (mais recentes primeiro) + resumo do CONJUNTO filtrado.
 //
 // options: { limit, status, canal, desde (Date, inclusivo), ate (Date, exclusivo),
+//            busca (texto: nome do cliente, id_face/telefone ou itens do pedido),
 //            cursor ({ t, id } já decodificado — ver cursor.util.js) }
 // Devolve { itens, proximoCursor, resumo }. O resumo cobre TODAS as vendas que
 // casam com os filtros (não só a página), pra os totais de um painel não mudarem
@@ -97,6 +99,12 @@ export async function getSalesDetails(options = {}) {
     if (options.desde) filtros.push(gte(vendas.criadoEm, options.desde));
     if (options.ate) filtros.push(lt(vendas.criadoEm, options.ate));
     if (options.idFace) filtros.push(eq(clientes.idFace, options.idFace)); // vendas de UM cliente
+    const busca = normalizarBusca(options.busca);
+    if (busca) {
+        filtros.push(
+            or(condicaoCliente(busca, clientes.nome, clientes.idFace), ilike(vendas.itensPedido, padraoContem(busca)))
+        );
+    }
 
     // O cursor só restringe a página, nunca o resumo.
     const condicoesDaPagina = [...filtros];

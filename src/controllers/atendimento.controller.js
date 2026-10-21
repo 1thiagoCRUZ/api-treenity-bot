@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { atendimentoService } from '../services/atendimento.service.js';
 import { deskcommService } from '../services/deskcomm.service.js';
 import { emitAlertaAtendimento } from '../sockets/realtime.js';
+import { buscaSchema } from '../utils/busca.util.js';
 import { decodificarCursor } from '../utils/cursor.util.js';
 
 const sinalizarSchema = z.object({
@@ -23,10 +24,12 @@ const encerrarPorClienteSchema = z.object({
 });
 
 // `desde` é inclusivo e `ate` é exclusivo, sobre a última atividade do atendimento.
-const listarSchema = z.object({
+export const listarSchema = z.object({
     canal: z.string().min(1).max(60).optional(),
     etapa: z.string().min(1).max(60).optional(),
     com_venda: z.enum(['true', 'false']).optional(),
+    em_andamento: z.enum(['true', 'false']).optional(), // true = fora Fechada/Perdida; false = sem filtro
+    busca: buscaSchema,
     desde: z.coerce.date().optional(),
     ate: z.coerce.date().optional(),
     cursor: z.string().max(300).optional(),
@@ -43,7 +46,7 @@ export const atendimentoController = {
         if (!parsed.success) {
             return res.status(400).json({ success: false, error: 'Parâmetros inválidos', detalhes: parsed.error.flatten() });
         }
-        const { cursor: cursorTexto, com_venda, ...filtros } = parsed.data;
+        const { cursor: cursorTexto, com_venda, em_andamento, ...filtros } = parsed.data;
 
         let cursor;
         if (cursorTexto) {
@@ -53,6 +56,7 @@ export const atendimentoController = {
 
         const { itens, proximoCursor } = await atendimentoService.listarTodos({
             ...filtros,
+            emAndamento: em_andamento === 'true' ? true : undefined,
             comVenda: com_venda === undefined ? undefined : com_venda === 'true',
             cursor,
         });
