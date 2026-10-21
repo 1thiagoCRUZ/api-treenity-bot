@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { getMetrics, consolidateMetrics, getSalesDetails } from '../services/dashboard.service.js';
+import { buscaSchema } from '../utils/busca.util.js';
 import { decodificarCursor } from '../utils/cursor.util.js';
 
 // `desde` é inclusivo e `ate` é exclusivo (ex: pra um dia inteiro, ate = dia seguinte).
@@ -8,6 +9,7 @@ const vendasQuerySchema = z.object({
     status: z.string().min(1).max(60).optional(),
     canal: z.string().min(1).max(60).optional(),
     id_face: z.string().min(1).max(64).optional(),
+    busca: buscaSchema,
     desde: z.coerce.date().optional(),
     ate: z.coerce.date().optional(),
     cursor: z.string().max(300).optional(),
