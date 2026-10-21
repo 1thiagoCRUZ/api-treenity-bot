@@ -223,7 +223,10 @@ export const atendimentoService = {
                 eq(clientes.idFace, idFace),
                 ne(atendimentos.statusFunil, 'Fechada'),
                 // Com conta_id, só o cliente DESSA empresa; sem ele, o comportamento antigo.
-                contaId ? eq(clientes.contaId, contaId) : undefined,
+                // A empresa do atendimento manda (id_face é único em clientes, então o
+                // mesmo número pode ter atendimentos de empresas diferentes); linha
+                // legada sem conta no atendimento cai para a conta do cliente.
+                contaId ? sql`coalesce(${atendimentos.contaId}, ${clientes.contaId}) = ${contaId}` : undefined,
             ))
             .orderBy(desc(atendimentos.criadoEm))
             .limit(1);

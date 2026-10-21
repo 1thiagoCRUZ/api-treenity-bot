@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import express from 'express';
 
 const URL_TESTE = process.env.SINALIZAR_TEST_DATABASE_URL;
+if (URL_TESTE && !/test|127\.0\.0\.1|localhost/.test(URL_TESTE)) throw new Error('SINALIZAR_TEST_DATABASE_URL deve ser um banco local/descartável');
 process.env.DATABASE_URL = URL_TESTE || 'postgresql://u:p@127.0.0.1:1/dummy';
 process.env.JWT_ACCESS_SECRET = 'teste-nao-e-segredo-real';
 process.env.ENCRYPTION_KEY = 'teste-nao-e-segredo-real';
@@ -66,9 +67,14 @@ test.before(async () => {
         motivo_atencao varchar, atencao_sinalizada_em timestamptz)`);
     await db.execute(sql`insert into clientes (id, id_face, nome, conta_id) values
         ('00000000-0000-0000-0000-0000000000a1','5511aaa','Ana','conta-A'),
-        ('00000000-0000-0000-0000-0000000000b1','5511bbb','Bia','conta-B')`);
-    await db.execute(sql`insert into atendimentos (cliente_id) values
-        ('00000000-0000-0000-0000-0000000000a1'),('00000000-0000-0000-0000-0000000000b1')`);
+        ('00000000-0000-0000-0000-0000000000b1','5511bbb','Bia','conta-B'),
+        ('00000000-0000-0000-0000-0000000000c1','5511ccc','Caio','conta-A'),
+        ('00000000-0000-0000-0000-0000000000d1','5511ddd','Duda',null)`);
+    // Caio: cliente gravado na conta-A, mas o atendimento aberto é da conta-B (mesmo número, duas empresas).
+    // Duda: linha legada, sem conta em lugar nenhum do atendimento; cliente sem conta.
+    await db.execute(sql`insert into atendimentos (cliente_id, conta_id) values
+        ('00000000-0000-0000-0000-0000000000a1','conta-A'),('00000000-0000-0000-0000-0000000000b1','conta-B'),
+        ('00000000-0000-0000-0000-0000000000c1','conta-B'),('00000000-0000-0000-0000-0000000000d1',null)`);
 });
 const marcados = async () =>
     (await db.execute(sql`select c.id_face from atendimentos a join clientes c on c.id=a.cliente_id
@@ -89,6 +95,20 @@ test('com conta_id de OUTRA empresa: 404 e nada é marcado', comBanco, async () 
     await limpar();
     const r = await chamar({ id_face: '5511aaa', motivo: 'x', conta_id: 'conta-B' });
     assert.equal(r.status, 404);
+    assert.deepEqual(await marcados(), []);
+});
+
+test('mesmo número em duas empresas: vale a conta do ATENDIMENTO, não a do cliente', comBanco, async () => {
+    await limpar();
+    assert.equal((await chamar({ id_face: '5511ccc', motivo: 'x', conta_id: 'conta-A' })).status, 404);
+    assert.deepEqual(await marcados(), []);
+    assert.equal((await chamar({ id_face: '5511ccc', motivo: 'x', conta_id: 'conta-B' })).status, 200);
+    assert.deepEqual(await marcados(), ['5511ccc']);
+});
+
+test('atendimento sem conta e cliente sem conta: não casa com nenhuma conta', comBanco, async () => {
+    await limpar();
+    assert.equal((await chamar({ id_face: '5511ddd', motivo: 'x', conta_id: 'conta-A' })).status, 404);
     assert.deepEqual(await marcados(), []);
 });
 
