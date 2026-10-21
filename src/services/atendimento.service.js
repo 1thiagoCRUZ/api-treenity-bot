@@ -3,7 +3,7 @@ import { db } from '../db/client.js';
 import { atendimentos, clientes, mensagens, vendas } from '../db/schema.js';
 import { codificarCursor } from '../utils/cursor.util.js';
 import { condicaoCliente, extrairTrecho, normalizarBusca, padraoContem } from '../utils/busca.util.js';
-import { STATUS_AGUARDANDO } from './venda.service.js';
+import { STATUS_PAGA } from './venda.service.js';
 
 const LISTA_LIMITE_PADRAO = 30;
 const LISTA_LIMITE_MAXIMO = 100;
@@ -14,6 +14,12 @@ const PREVIA_MAX_CARACTERES = 140;
 // null) quebre a ordenação e o cursor.
 const atividadeEm = sql`coalesce(${atendimentos.atualizadoEm}, ${atendimentos.criadoEm}, 'epoch'::timestamptz)`;
 
+// Campos de "venda paga" para quem fechou pelo Inbox.
+const paga = (venda) => ({
+    statusVenda: STATUS_PAGA,
+    pagoEm: new Date(),
+    pagamentoConfirmadoPor: venda.fechadaPor ?? 'Equipe (Inbox)',
+});
 // Etapas que encerram o atendimento; qualquer outra (ou nula) é "em andamento".
 export const ETAPAS_ENCERRADAS = ['Fechada', 'Perdida'];
 
@@ -258,9 +264,10 @@ export const atendimentoService = {
     // do número) e, se teve venda, registra a venda com o valor informado —
     // ou atualiza o valor da que o CADU já gravou, sem criar outra.
     //
-    // A venda nasce "Aguardando Pagamento", como as do bot: quem confirma o
-    // pagamento é o mesmo fluxo de sempre (tarefa "Conferir pagamento PIX" no
-    // DeskComm), e o faturamento do painel passa a contar a venda da equipe.
+    // Quem fecha pelo Inbox "Teve venda" está dizendo que o cliente pagou (é o
+    // que "Fechadas" significa no painel): a venda já vale como "Paga", com o
+    // nome de quem fechou como quem confirmou. Antes ela nascia "Aguardando
+    // Pagamento" e ficava assim para sempre, porque ninguém voltava para marcar.
     //
     // Devolve null quando o cliente não tem atendimento aberto — conversa que
     // nunca passou pelo bot, ou já encerrada.
@@ -294,7 +301,11 @@ export const atendimentoService = {
                 if (existente) {
                     await tx
                         .update(vendas)
-                        .set({ valorTotal: venda.valorTotal, fechadaPor: venda.fechadaPor ?? null })
+                        .set({
+                            valorTotal: venda.valorTotal,
+                            fechadaPor: venda.fechadaPor ?? null,
+                            ...paga(venda),
+                        })
                         .where(eq(vendas.id, existente.id));
                     vendaId = existente.id;
                 }
@@ -307,8 +318,8 @@ export const atendimentoService = {
                         itensPedido: 'Venda fechada pela equipe no Inbox',
                         valorProdutos: venda.valorTotal,
                         valorTotal: venda.valorTotal,
-                        statusVenda: STATUS_AGUARDANDO,
                         fechadaPor: venda.fechadaPor ?? null,
+                        ...paga(venda),
                     })
                     .returning({ id: vendas.id });
                 vendaId = criada.id;
