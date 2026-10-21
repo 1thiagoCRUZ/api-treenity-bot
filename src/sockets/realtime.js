@@ -7,12 +7,12 @@ export function setIo(ioInstance) {
     io = ioInstance;
 }
 
-// Avisa qualquer painel conectado ao namespace /chat que um atendimento
-// precisa de atenção humana. Não lança erro se o Socket.io ainda não tiver
+// Avisa os painéis admin (sala SALA_DO_PAINEL) que um atendimento precisa de
+// atenção humana. NUNCA o namespace inteiro: o payload tem nome de cliente e motivo. Não lança erro se o Socket.io ainda não tiver
 // sido inicializado (ex: chamado fora do processo do servidor, em teste).
 export function emitAlertaAtendimento(payload) {
     if (!io) return;
-    io.of('/chat').emit('atendimento_sinalizado', payload);
+    io.of('/chat').to(SALA_DO_PAINEL).emit('atendimento_sinalizado', payload);
 }
 
 // Sala do painel admin: só entram sockets cujo token tem a claim `painelAdmin`
