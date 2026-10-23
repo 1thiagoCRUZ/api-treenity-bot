@@ -37,6 +37,21 @@ async function vendasAguardandoDoCliente(tx, idFaces) {
         .orderBy(desc(vendas.criadoEm));
 }
 
+// Regra de fatos da via "sem atendimento aberto": só devolve a venda quando
+// existe EXATAMENTE UMA Aguardando com valorTotal igual ao digitado (em centavos)
+// e criada DEPOIS de `desde` (início da conversa no painel). Sem `desde`, inválido
+// ou qualquer outro caso: null (não adivinha). Venda já Paga não entra em
+// `aguardando`, então não é candidata (idempotência).
+export function selecionarVendaParaPagar(aguardando, valorDigitado, desde) {
+    const inicio = desde instanceof Date ? desde.getTime() : NaN;
+    if (Number.isNaN(inicio)) return null;
+    const centavos = (v) => Math.round(Number(v) * 100);
+    const candidatas = aguardando.filter((v) =>
+        centavos(v.valorTotal) === centavos(valorDigitado)
+        && v.criadoEm && new Date(v.criadoEm).getTime() > inicio);
+    return candidatas.length === 1 ? candidatas[0] : null;
+}
+
 // Etapas que encerram o atendimento; qualquer outra (ou nula) é "em andamento".
 export const ETAPAS_ENCERRADAS = ['Fechada', 'Perdida'];
 
@@ -309,23 +324,19 @@ export const atendimentoService = {
                 .orderBy(desc(atendimentos.criadoEm))
                 .limit(1);
             if (!aberto) {
-                // Sem atendimento aberto (já fechado/perdido), quem fecha dizendo "teve
-                // venda" ainda está confirmando o pagamento da venda do CADU que ficou
-                // "Aguardando". Só marca quando há UMA candidata: com várias, não
-                // adivinha e devolve a contagem para o painel pedir a escolha.
+                // Sem atendimento aberto (a consulta acima só exclui 'Fechada'; 'Perdida'
+                // conta como aberta — pendência: decidir se Perdida deve ser tratada como
+                // encerrada). Aqui só se marca Paga com fatos: veja selecionarVendaParaPagar.
                 if (!venda) return null;
                 const aguardando = await vendasAguardandoDoCliente(tx, idFaces);
                 if (aguardando.length === 0) return null;
-                // Só paga a que casa com o que a equipe está fechando: mesmo valor ou criada
-                // nos últimos 3 dias. Uma venda antiga esquecida não vira "paga" por engano.
-                const candidata = aguardando[0];
-                const mesmoValor = Math.abs(Number(candidata.valorTotal) - venda.valorTotal) < 0.01;
-                const recente = candidata.criadoEm && Date.now() - new Date(candidata.criadoEm).getTime() < 3 * 24 * 3600 * 1000;
-                if (aguardando.length > 1 || !(mesmoValor || recente)) {
+                const candidata = selecionarVendaParaPagar(aguardando, venda.valorTotal, venda.desde);
+                if (!candidata) {
                     return { atendimentoId: null, vendaId: null, aguardandoPendentes: aguardando.length };
                 }
-                await tx.update(vendas).set({ valorTotal: venda.valorTotal, fechadaPor: venda.fechadaPor ?? null, ...paga(venda) }).where(eq(vendas.id, candidata.id));
-                return { atendimentoId: null, vendaId: candidata.id, aguardandoPendentes: 0 };
+                // Nunca sobrescreve valorTotal: o valor já era igual ao digitado.
+                await tx.update(vendas).set({ fechadaPor: venda.fechadaPor ?? null, ...paga(venda) }).where(eq(vendas.id, candidata.id));
+                return { atendimentoId: null, vendaId: candidata.id, aguardandoPendentes: aguardando.length - 1 };
             }
 
             let vendaId = null;
