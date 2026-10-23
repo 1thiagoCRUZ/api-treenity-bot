@@ -26,7 +26,7 @@ const paga = (venda) => ({
 // default da coluna.
 async function vendasAguardandoDoCliente(tx, idFaces) {
     return tx
-        .select({ id: vendas.id })
+        .select({ id: vendas.id, valorTotal: vendas.valorTotal, criadoEm: vendas.criadoEm })
         .from(vendas)
         .innerJoin(atendimentos, eq(vendas.atendimentoId, atendimentos.id))
         .innerJoin(clientes, eq(atendimentos.clienteId, clientes.id))
@@ -316,11 +316,16 @@ export const atendimentoService = {
                 if (!venda) return null;
                 const aguardando = await vendasAguardandoDoCliente(tx, idFaces);
                 if (aguardando.length === 0) return null;
-                if (aguardando.length > 1) {
+                // Só paga a que casa com o que a equipe está fechando: mesmo valor ou criada
+                // nos últimos 3 dias. Uma venda antiga esquecida não vira "paga" por engano.
+                const candidata = aguardando[0];
+                const mesmoValor = Math.abs(Number(candidata.valorTotal) - venda.valorTotal) < 0.01;
+                const recente = candidata.criadoEm && Date.now() - new Date(candidata.criadoEm).getTime() < 3 * 24 * 3600 * 1000;
+                if (aguardando.length > 1 || !(mesmoValor || recente)) {
                     return { atendimentoId: null, vendaId: null, aguardandoPendentes: aguardando.length };
                 }
-                await tx.update(vendas).set(paga(venda)).where(eq(vendas.id, aguardando[0].id));
-                return { atendimentoId: null, vendaId: aguardando[0].id, aguardandoPendentes: 0 };
+                await tx.update(vendas).set({ valorTotal: venda.valorTotal, fechadaPor: venda.fechadaPor ?? null, ...paga(venda) }).where(eq(vendas.id, candidata.id));
+                return { atendimentoId: null, vendaId: candidata.id, aguardandoPendentes: 0 };
             }
 
             let vendaId = null;
