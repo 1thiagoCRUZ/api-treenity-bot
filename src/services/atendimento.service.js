@@ -52,6 +52,24 @@ export function selecionarVendaParaPagar(aguardando, valorDigitado, desde) {
     return candidatas.length === 1 ? candidatas[0] : null;
 }
 
+// Decisão pura de "o que fazer com a venda" ao fechar com atendimento aberto.
+//  - existente Aguardando: atualiza valor final e marca Paga;
+//  - existente já Paga (ou outro status): não regrava, só devolve o id;
+//  - sem existente: se há UMA candidata (selecionarVendaParaPagar), marca ESSA Paga
+//    sem mexer no valor; só sem candidata insere venda nova.
+export function decidirVendaAoFechar({ existente, aguardando, venda }) {
+    if (!venda) return { acao: 'nada', vendaId: null };
+    if (existente) {
+        const aguardandoPag = (existente.statusVenda ?? STATUS_AGUARDANDO) === STATUS_AGUARDANDO;
+        return aguardandoPag
+            ? { acao: 'atualizar', vendaId: existente.id }
+            : { acao: 'nada', vendaId: existente.id };
+    }
+    const candidata = selecionarVendaParaPagar(aguardando ?? [], venda.valorTotal, venda.desde);
+    if (candidata) return { acao: 'pagar_candidata', vendaId: candidata.id };
+    return { acao: 'inserir', vendaId: null };
+}
+
 // Etapas que encerram o atendimento; qualquer outra (ou nula) é "em andamento".
 export const ETAPAS_ENCERRADAS = ['Fechada', 'Perdida'];
 
@@ -347,36 +365,42 @@ export const atendimentoService = {
                 // desconto que ela deu, se deu — e os itens do CADU ficam. Criar
                 // outra linha contaria a mesma venda duas vezes no faturamento.
                 const [existente] = await tx
-                    .select({ id: vendas.id })
+                    .select({ id: vendas.id, statusVenda: vendas.statusVenda })
                     .from(vendas)
                     .where(eq(vendas.atendimentoId, aberto.id))
                     .orderBy(desc(vendas.criadoEm))
                     .limit(1);
-                if (existente) {
+                // Sem venda no atendimento aberto, a do CADU pode estar num atendimento
+                // já 'Fechada' do mesmo cliente (o Analista de CRM fecha A e a mensagem
+                // seguinte abre B): procura a candidata ANTES de inserir outra.
+                const aguardando = existente ? [] : await vendasAguardandoDoCliente(tx, idFaces);
+                const decisao = decidirVendaAoFechar({ existente, aguardando, venda });
+                vendaId = decisao.vendaId;
+                if (decisao.acao === 'atualizar') {
                     await tx
                         .update(vendas)
-                        .set({
+                        .set({ valorTotal: venda.valorTotal, fechadaPor: venda.fechadaPor ?? null, ...paga(venda) })
+                        .where(eq(vendas.id, decisao.vendaId));
+                } else if (decisao.acao === 'pagar_candidata') {
+                    // Nunca sobrescreve valorTotal: o valor já era igual ao digitado.
+                    await tx
+                        .update(vendas)
+                        .set({ fechadaPor: venda.fechadaPor ?? null, ...paga(venda) })
+                        .where(eq(vendas.id, decisao.vendaId));
+                } else if (decisao.acao === 'inserir') {
+                    const [criada] = await tx
+                        .insert(vendas)
+                        .values({
+                            atendimentoId: aberto.id,
+                            itensPedido: 'Venda fechada pela equipe no Inbox',
+                            valorProdutos: venda.valorTotal,
                             valorTotal: venda.valorTotal,
                             fechadaPor: venda.fechadaPor ?? null,
                             ...paga(venda),
                         })
-                        .where(eq(vendas.id, existente.id));
-                    vendaId = existente.id;
+                        .returning({ id: vendas.id });
+                    vendaId = criada.id;
                 }
-            }
-            if (venda && !vendaId) {
-                const [criada] = await tx
-                    .insert(vendas)
-                    .values({
-                        atendimentoId: aberto.id,
-                        itensPedido: 'Venda fechada pela equipe no Inbox',
-                        valorProdutos: venda.valorTotal,
-                        valorTotal: venda.valorTotal,
-                        fechadaPor: venda.fechadaPor ?? null,
-                        ...paga(venda),
-                    })
-                    .returning({ id: vendas.id });
-                vendaId = criada.id;
             }
 
             await tx
