@@ -24,6 +24,8 @@ const encerrarPorClienteSchema = z.object({
     id_faces: z.array(z.string().min(1).max(64)).min(1).max(6),
     venda: z.object({ valor_total: z.number().positive().max(10_000_000) }).optional(),
     fechada_por: z.string().min(1).max(120).optional(),
+    // Início da conversa no painel; sem ele a via sem atendimento aberto não marca nada.
+    desde: z.coerce.date().optional(),
 });
 
 // `desde` é inclusivo e `ate` é exclusivo, sobre a última atividade do atendimento.
@@ -103,10 +105,10 @@ export const atendimentoController = {
         if (!parsed.success) {
             return res.status(400).json({ success: false, error: 'id_faces é obrigatório; venda.valor_total deve ser positivo' });
         }
-        const { id_faces, venda, fechada_por: fechadaPor } = parsed.data;
+        const { id_faces, venda, fechada_por: fechadaPor, desde } = parsed.data;
         const resultado = await atendimentoService.encerrarPorCliente(
             id_faces,
-            venda ? { valorTotal: venda.valor_total, fechadaPor } : null,
+            venda ? { valorTotal: venda.valor_total, fechadaPor, desde } : null,
         );
         if (!resultado) {
             return res.status(404).json({ success: false, error: 'Nenhum atendimento aberto para esse cliente' });

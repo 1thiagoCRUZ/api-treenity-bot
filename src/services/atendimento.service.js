@@ -3,7 +3,7 @@ import { db } from '../db/client.js';
 import { atendimentos, clientes, mensagens, vendas } from '../db/schema.js';
 import { codificarCursor } from '../utils/cursor.util.js';
 import { condicaoCliente, extrairTrecho, normalizarBusca, padraoContem } from '../utils/busca.util.js';
-import { STATUS_PAGA } from './venda.service.js';
+import { STATUS_AGUARDANDO, STATUS_PAGA } from './venda.service.js';
 
 const LISTA_LIMITE_PADRAO = 30;
 const LISTA_LIMITE_MAXIMO = 100;
@@ -20,6 +20,56 @@ const paga = (venda) => ({
     pagoEm: new Date(),
     pagamentoConfirmadoPor: venda.fechadaPor ?? 'Equipe (Inbox)',
 });
+
+// Vendas ainda "Aguardando Pagamento" do cliente (qualquer grafia do número),
+// da mais recente para a mais antiga. Status nulo conta como aguardando, como no
+// default da coluna.
+async function vendasAguardandoDoCliente(tx, idFaces) {
+    return tx
+        .select({ id: vendas.id, valorTotal: vendas.valorTotal, criadoEm: vendas.criadoEm })
+        .from(vendas)
+        .innerJoin(atendimentos, eq(vendas.atendimentoId, atendimentos.id))
+        .innerJoin(clientes, eq(atendimentos.clienteId, clientes.id))
+        .where(and(
+            inArray(clientes.idFace, idFaces),
+            sql`coalesce(${vendas.statusVenda}, ${STATUS_AGUARDANDO}) = ${STATUS_AGUARDANDO}`,
+        ))
+        .orderBy(desc(vendas.criadoEm));
+}
+
+// Regra de fatos da via "sem atendimento aberto": só devolve a venda quando
+// existe EXATAMENTE UMA Aguardando com valorTotal igual ao digitado (em centavos)
+// e criada DEPOIS de `desde` (início da conversa no painel). Sem `desde`, inválido
+// ou qualquer outro caso: null (não adivinha). Venda já Paga não entra em
+// `aguardando`, então não é candidata (idempotência).
+export function selecionarVendaParaPagar(aguardando, valorDigitado, desde) {
+    const inicio = desde instanceof Date ? desde.getTime() : NaN;
+    if (Number.isNaN(inicio)) return null;
+    const centavos = (v) => Math.round(Number(v) * 100);
+    const candidatas = aguardando.filter((v) =>
+        centavos(v.valorTotal) === centavos(valorDigitado)
+        && v.criadoEm && new Date(v.criadoEm).getTime() > inicio);
+    return candidatas.length === 1 ? candidatas[0] : null;
+}
+
+// Decisão pura de "o que fazer com a venda" ao fechar com atendimento aberto.
+//  - existente Aguardando: atualiza valor final e marca Paga;
+//  - existente já Paga (ou outro status): não regrava, só devolve o id;
+//  - sem existente: se há UMA candidata (selecionarVendaParaPagar), marca ESSA Paga
+//    sem mexer no valor; só sem candidata insere venda nova.
+export function decidirVendaAoFechar({ existente, aguardando, venda }) {
+    if (!venda) return { acao: 'nada', vendaId: null };
+    if (existente) {
+        const aguardandoPag = (existente.statusVenda ?? STATUS_AGUARDANDO) === STATUS_AGUARDANDO;
+        return aguardandoPag
+            ? { acao: 'atualizar', vendaId: existente.id }
+            : { acao: 'nada', vendaId: existente.id };
+    }
+    const candidata = selecionarVendaParaPagar(aguardando ?? [], venda.valorTotal, venda.desde);
+    if (candidata) return { acao: 'pagar_candidata', vendaId: candidata.id };
+    return { acao: 'inserir', vendaId: null };
+}
+
 // Etapas que encerram o atendimento; qualquer outra (ou nula) é "em andamento".
 export const ETAPAS_ENCERRADAS = ['Fechada', 'Perdida'];
 
@@ -291,7 +341,21 @@ export const atendimentoService = {
                 ))
                 .orderBy(desc(atendimentos.criadoEm))
                 .limit(1);
-            if (!aberto) return null;
+            if (!aberto) {
+                // Sem atendimento aberto (a consulta acima só exclui 'Fechada'; 'Perdida'
+                // conta como aberta — pendência: decidir se Perdida deve ser tratada como
+                // encerrada). Aqui só se marca Paga com fatos: veja selecionarVendaParaPagar.
+                if (!venda) return null;
+                const aguardando = await vendasAguardandoDoCliente(tx, idFaces);
+                if (aguardando.length === 0) return null;
+                const candidata = selecionarVendaParaPagar(aguardando, venda.valorTotal, venda.desde);
+                if (!candidata) {
+                    return { atendimentoId: null, vendaId: null, aguardandoPendentes: aguardando.length };
+                }
+                // Nunca sobrescreve valorTotal: o valor já era igual ao digitado.
+                await tx.update(vendas).set({ fechadaPor: venda.fechadaPor ?? null, ...paga(venda) }).where(eq(vendas.id, candidata.id));
+                return { atendimentoId: null, vendaId: candidata.id, aguardandoPendentes: aguardando.length - 1 };
+            }
 
             let vendaId = null;
             if (venda) {
@@ -301,36 +365,42 @@ export const atendimentoService = {
                 // desconto que ela deu, se deu — e os itens do CADU ficam. Criar
                 // outra linha contaria a mesma venda duas vezes no faturamento.
                 const [existente] = await tx
-                    .select({ id: vendas.id })
+                    .select({ id: vendas.id, statusVenda: vendas.statusVenda })
                     .from(vendas)
                     .where(eq(vendas.atendimentoId, aberto.id))
                     .orderBy(desc(vendas.criadoEm))
                     .limit(1);
-                if (existente) {
+                // Sem venda no atendimento aberto, a do CADU pode estar num atendimento
+                // já 'Fechada' do mesmo cliente (o Analista de CRM fecha A e a mensagem
+                // seguinte abre B): procura a candidata ANTES de inserir outra.
+                const aguardando = existente ? [] : await vendasAguardandoDoCliente(tx, idFaces);
+                const decisao = decidirVendaAoFechar({ existente, aguardando, venda });
+                vendaId = decisao.vendaId;
+                if (decisao.acao === 'atualizar') {
                     await tx
                         .update(vendas)
-                        .set({
+                        .set({ valorTotal: venda.valorTotal, fechadaPor: venda.fechadaPor ?? null, ...paga(venda) })
+                        .where(eq(vendas.id, decisao.vendaId));
+                } else if (decisao.acao === 'pagar_candidata') {
+                    // Nunca sobrescreve valorTotal: o valor já era igual ao digitado.
+                    await tx
+                        .update(vendas)
+                        .set({ fechadaPor: venda.fechadaPor ?? null, ...paga(venda) })
+                        .where(eq(vendas.id, decisao.vendaId));
+                } else if (decisao.acao === 'inserir') {
+                    const [criada] = await tx
+                        .insert(vendas)
+                        .values({
+                            atendimentoId: aberto.id,
+                            itensPedido: 'Venda fechada pela equipe no Inbox',
+                            valorProdutos: venda.valorTotal,
                             valorTotal: venda.valorTotal,
                             fechadaPor: venda.fechadaPor ?? null,
                             ...paga(venda),
                         })
-                        .where(eq(vendas.id, existente.id));
-                    vendaId = existente.id;
+                        .returning({ id: vendas.id });
+                    vendaId = criada.id;
                 }
-            }
-            if (venda && !vendaId) {
-                const [criada] = await tx
-                    .insert(vendas)
-                    .values({
-                        atendimentoId: aberto.id,
-                        itensPedido: 'Venda fechada pela equipe no Inbox',
-                        valorProdutos: venda.valorTotal,
-                        valorTotal: venda.valorTotal,
-                        fechadaPor: venda.fechadaPor ?? null,
-                        ...paga(venda),
-                    })
-                    .returning({ id: vendas.id });
-                vendaId = criada.id;
             }
 
             await tx
@@ -338,7 +408,12 @@ export const atendimentoService = {
                 .set({ statusFunil: 'Fechada', precisaAtencaoHumana: false, atualizadoEm: new Date() })
                 .where(eq(atendimentos.id, aberto.id));
 
-            return { atendimentoId: aberto.id, vendaId };
+            // Outras vendas do cliente que seguem "Aguardando": o painel avisa a
+            // equipe em vez de o bot escolher entre elas.
+            const aguardandoPendentes = venda
+                ? (await vendasAguardandoDoCliente(tx, idFaces)).filter((v) => v.id !== vendaId).length
+                : 0;
+            return { atendimentoId: aberto.id, vendaId, aguardandoPendentes };
         });
     },
 
